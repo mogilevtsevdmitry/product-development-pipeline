@@ -10,6 +10,7 @@ export type AgentStatus =
 export type PipelineMode = "auto" | "human_approval";
 
 export type ProjectStatus =
+  | "created"
   | "running"
   | "paused_at_gate"
   | "paused"

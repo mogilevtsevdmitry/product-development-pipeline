@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { execSync } from "child_process";
 import type { ProjectState, GateType, GateDecisionValue } from "./types";
 
 const STATE_DIR = path.resolve(
@@ -132,7 +133,7 @@ export function createProject(
     created_at: timestamp,
     updated_at: timestamp,
     mode,
-    status: "running",
+    status: "created",
     current_gate: null,
     pipeline_graph: {
       nodes: [...STATIC_CHAIN],
@@ -266,6 +267,298 @@ export function stopProject(id: string): boolean {
   const filePath = path.join(STATE_DIR, `${id}.json`);
   fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
   return true;
+}
+
+// ============================================================================
+// Удаление проекта
+// ============================================================================
+
+// ============================================================================
+// Запуск пайплайна
+// ============================================================================
+
+const AGENTS_DIR = path.resolve(process.cwd(), "..", "agents");
+
+const AGENT_DIRS: Record<string, string> = {
+  "problem-researcher": "research/problem-researcher",
+  "market-researcher": "research/market-researcher",
+  "product-owner": "product/product-owner",
+  "pipeline-architect": "meta/pipeline-architect",
+  "business-analyst": "product/business-analyst",
+  "legal-compliance": "legal/legal-compliance",
+  "ux-ui-designer": "design/ux-ui-designer",
+  "system-architect": "development/system-architect",
+  "tech-lead": "development/tech-lead",
+  "backend-developer": "development/backend-developer",
+  "frontend-developer": "development/frontend-developer",
+  "devops-engineer": "development/devops-engineer",
+  "qa-engineer": "quality/qa-engineer",
+  "security-engineer": "quality/security-engineer",
+  "release-manager": "release/release-manager",
+  "product-marketer": "marketing/product-marketer",
+  "smm-manager": "marketing/smm-manager",
+  "content-creator": "marketing/content-creator",
+  "customer-support": "feedback/customer-support",
+  "data-analyst": "feedback/data-analyst",
+  orchestrator: "meta/orchestrator",
+};
+
+const AGENT_PHASES: Record<string, string> = {
+  "problem-researcher": "research",
+  "market-researcher": "research",
+  "product-owner": "product",
+  "pipeline-architect": "meta",
+  "business-analyst": "product",
+  "legal-compliance": "legal",
+  "ux-ui-designer": "design",
+  "system-architect": "development",
+  "tech-lead": "development",
+  "backend-developer": "development",
+  "frontend-developer": "development",
+  "devops-engineer": "development",
+  "qa-engineer": "quality",
+  "security-engineer": "quality",
+  "release-manager": "release",
+  "product-marketer": "marketing",
+  "smm-manager": "marketing",
+  "content-creator": "marketing",
+  "customer-support": "feedback",
+  "data-analyst": "feedback",
+  orchestrator: "meta",
+};
+
+/**
+ * Найти агентов, готовых к запуску (все зависимости completed).
+ */
+function findReadyAgents(state: ProjectState): string[] {
+  const ready: string[] = [];
+  for (const nodeId of state.pipeline_graph.nodes) {
+    const agent = state.agents[nodeId];
+    if (!agent || agent.status !== "pending") continue;
+
+    const deps = state.pipeline_graph.edges
+      .filter(([, tgt]) => tgt === nodeId)
+      .map(([src]) => src);
+
+    const allDone = deps.every(
+      (d) => state.agents[d]?.status === "completed"
+    );
+    if (allDone) ready.push(nodeId);
+  }
+  return ready;
+}
+
+/**
+ * Собрать входной контекст из артефактов зависимостей.
+ */
+function collectInputContext(
+  agentId: string,
+  state: ProjectState
+): string {
+  const deps = state.pipeline_graph.edges
+    .filter(([, tgt]) => tgt === agentId)
+    .map(([src]) => src);
+
+  const parts: string[] = [];
+  const projectDir = path.join(PROJECTS_DIR, state.project_id);
+
+  for (const dep of deps) {
+    const depAgent = state.agents[dep];
+    if (depAgent?.status !== "completed") continue;
+    for (const artifactPath of depAgent.artifacts) {
+      const fullPath = path.join(projectDir, artifactPath);
+      if (fs.existsSync(fullPath)) {
+        const content = fs.readFileSync(fullPath, "utf-8");
+        parts.push(`--- Артефакт: ${artifactPath} ---\n${content}\n`);
+      }
+    }
+  }
+
+  // Для первого агента передаём описание проекта
+  if (deps.length === 0 && state.description) {
+    parts.push(`--- Описание проекта ---\n${state.description}\n`);
+  }
+
+  return parts.join("\n");
+}
+
+/**
+ * Запуск одного агента через Claude CLI.
+ */
+export function runNextAgent(id: string): {
+  ok: boolean;
+  agentId?: string;
+  error?: string;
+} {
+  const state = getProjectState(id);
+  if (!state) return { ok: false, error: "Проект не найден" };
+  if (state.status !== "running" && state.status !== "created") {
+    return { ok: false, error: `Нельзя запускать агентов в статусе: ${state.status}` };
+  }
+
+  // Если created → переводим в running
+  if (state.status === "created") {
+    state.status = "running";
+  }
+
+  const ready = findReadyAgents(state);
+  if (ready.length === 0) {
+    // Проверяем, завершён ли пайплайн
+    const allDone = state.pipeline_graph.nodes.every(
+      (n) => {
+        const s = state.agents[n]?.status;
+        return s === "completed" || s === "skipped";
+      }
+    );
+    if (allDone) {
+      state.status = "completed";
+      state.updated_at = new Date().toISOString();
+      const fp = path.join(STATE_DIR, `${id}.json`);
+      fs.writeFileSync(fp, JSON.stringify(state, null, 2), "utf-8");
+      return { ok: true, agentId: undefined, error: "Пайплайн завершён" };
+    }
+    return { ok: false, error: "Нет готовых агентов (ожидают зависимости или gate)" };
+  }
+
+  const agentId = ready[0];
+  const now = new Date().toISOString();
+
+  // Mark running
+  state.agents[agentId].status = "running";
+  state.agents[agentId].started_at = now;
+  state.updated_at = now;
+  const stateFile = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(stateFile, JSON.stringify(state, null, 2), "utf-8");
+
+  // Load prompts
+  const agentDir = path.join(AGENTS_DIR, AGENT_DIRS[agentId] || agentId);
+  let systemPrompt = "";
+  let rules = "";
+  try {
+    systemPrompt = fs.readFileSync(path.join(agentDir, "system-prompt.md"), "utf-8");
+  } catch { /* skip */ }
+  try {
+    rules = fs.readFileSync(path.join(agentDir, "rules.md"), "utf-8");
+  } catch { /* skip */ }
+
+  const context = collectInputContext(agentId, state);
+
+  // Output dir
+  const phase = AGENT_PHASES[agentId] || "other";
+  const outputDir = path.join(PROJECTS_DIR, id, phase, agentId);
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  // Build prompt
+  const fullPrompt = [
+    systemPrompt,
+    rules ? `\n\n# Правила\n\n${rules}` : "",
+    context ? `\n\n# Входные данные\n\n${context}` : "",
+    `\n\n# Инструкции по сохранению\n\nСохрани все выходные артефакты в директорию: ${outputDir}\nФормат: Markdown (.md файлы).`,
+  ].join("");
+
+  try {
+    execSync(
+      `claude --print --dangerously-skip-permissions -p "${fullPrompt.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`,
+      {
+        cwd: outputDir,
+        timeout: 600_000,
+        stdio: "pipe",
+        encoding: "utf-8",
+      }
+    );
+  } catch (err) {
+    // Agent failed
+    const reloadedState = getProjectState(id)!;
+    reloadedState.agents[agentId].status = "failed";
+    reloadedState.agents[agentId].completed_at = new Date().toISOString();
+    reloadedState.agents[agentId].error = err instanceof Error ? err.message : String(err);
+    reloadedState.updated_at = new Date().toISOString();
+    fs.writeFileSync(stateFile, JSON.stringify(reloadedState, null, 2), "utf-8");
+    return { ok: false, agentId, error: `Агент ${agentId} завершился с ошибкой` };
+  }
+
+  // Collect output artifacts
+  const artifacts: string[] = [];
+  const projectDir = path.join(PROJECTS_DIR, id);
+  function walk(dir: string) {
+    if (!fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) walk(path.join(dir, entry.name));
+      else if (entry.name.endsWith(".md")) {
+        artifacts.push(path.relative(projectDir, path.join(dir, entry.name)));
+      }
+    }
+  }
+  walk(outputDir);
+
+  // Update state
+  const finalState = getProjectState(id)!;
+  finalState.agents[agentId].status = "completed";
+  finalState.agents[agentId].completed_at = new Date().toISOString();
+  finalState.agents[agentId].artifacts = artifacts;
+  finalState.agents[agentId].error = null;
+  finalState.updated_at = new Date().toISOString();
+
+  // Check if pipeline is complete
+  const allDone = finalState.pipeline_graph.nodes.every(
+    (n) => {
+      const s = finalState.agents[n]?.status;
+      return s === "completed" || s === "skipped";
+    }
+  );
+  if (allDone) {
+    finalState.status = "completed";
+  }
+
+  fs.writeFileSync(stateFile, JSON.stringify(finalState, null, 2), "utf-8");
+  return { ok: true, agentId };
+}
+
+/**
+ * Запустить все готовые агенты по цепочке (auto-режим).
+ * Запускает по одному, пока есть готовые.
+ */
+export function startPipeline(id: string): {
+  ok: boolean;
+  ran: string[];
+  error?: string;
+} {
+  const state = getProjectState(id);
+  if (!state) return { ok: false, ran: [], error: "Проект не найден" };
+
+  if (state.status === "created") {
+    state.status = "running";
+    state.updated_at = new Date().toISOString();
+    const fp = path.join(STATE_DIR, `${id}.json`);
+    fs.writeFileSync(fp, JSON.stringify(state, null, 2), "utf-8");
+  }
+
+  const ran: string[] = [];
+
+  while (true) {
+    const current = getProjectState(id);
+    if (!current) break;
+    if (current.status !== "running") break;
+
+    const ready = findReadyAgents(current);
+    if (ready.length === 0) break;
+
+    const result = runNextAgent(id);
+    if (result.agentId) ran.push(result.agentId);
+    if (!result.ok) break;
+
+    // В human_approval режиме — остановка после каждого
+    if (current.mode === "human_approval") {
+      const updated = getProjectState(id)!;
+      updated.status = "paused";
+      updated.updated_at = new Date().toISOString();
+      const fp = path.join(STATE_DIR, `${id}.json`);
+      fs.writeFileSync(fp, JSON.stringify(updated, null, 2), "utf-8");
+      break;
+    }
+  }
+
+  return { ok: true, ran };
 }
 
 // ============================================================================

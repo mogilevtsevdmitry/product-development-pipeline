@@ -46,6 +46,11 @@ const STATUS_CONFIG: Record<
     bg: "bg-gray-400/10 text-gray-400 border-gray-400/20",
     label: "Остановлен",
   },
+  created: {
+    color: "bg-indigo-400",
+    bg: "bg-indigo-400/10 text-indigo-400 border-indigo-400/20",
+    label: "Создан",
+  },
 };
 
 interface StatusBadgeProps {

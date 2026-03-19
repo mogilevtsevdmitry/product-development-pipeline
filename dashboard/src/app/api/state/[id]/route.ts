@@ -7,6 +7,8 @@ import {
   resumeProject,
   stopProject,
   deleteProject,
+  runNextAgent,
+  startPipeline,
 } from "@/lib/state";
 import type { GateType, GateDecisionValue, PipelineMode } from "@/lib/types";
 
@@ -58,6 +60,16 @@ export async function POST(
     const ok = stopProject(id);
     if (!ok) return NextResponse.json({ error: "Невозможно остановить" }, { status: 400 });
     return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "run_next") {
+    const result = runNextAgent(id);
+    return NextResponse.json(result, { status: result.ok ? 200 : 400 });
+  }
+
+  if (body.action === "start_pipeline") {
+    const result = startPipeline(id);
+    return NextResponse.json(result, { status: result.ok ? 200 : 400 });
   }
 
   // --- Gate-решение ---

@@ -147,7 +147,48 @@ export default function ProjectPage({
 
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-2 mb-6 p-4 rounded-xl border border-gray-800 bg-gray-900">
-        {/* Pause / Resume */}
+        {/* Start pipeline */}
+        {state.status === "created" && (
+          <button
+            onClick={() => sendAction("start_pipeline")}
+            disabled={actionLoading !== null}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 transition-colors disabled:opacity-50"
+          >
+            {actionLoading === "start_pipeline" ? (
+              <><span className="animate-spin">⏳</span> Запускается...</>
+            ) : (
+              <>🚀 Запустить пайплайн</>
+            )}
+          </button>
+        )}
+
+        {/* Run next agent */}
+        {(state.status === "running" || state.status === "paused") && (
+          <button
+            onClick={() => sendAction("run_next")}
+            disabled={actionLoading !== null}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors disabled:opacity-50"
+          >
+            {actionLoading === "run_next" ? (
+              <><span className="animate-spin">⏳</span> Агент работает...</>
+            ) : (
+              <>▶ Запустить следующего агента</>
+            )}
+          </button>
+        )}
+
+        {/* Auto-run all */}
+        {state.status === "running" && state.mode === "auto" && (
+          <button
+            onClick={() => sendAction("start_pipeline")}
+            disabled={actionLoading !== null}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-emerald-600/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+          >
+            {actionLoading === "start_pipeline" ? "⏳ Работает..." : "⚡ Запустить всех готовых"}
+          </button>
+        )}
+
+        {/* Pause */}
         {state.status === "running" && (
           <button
             onClick={() => sendAction("pause")}
@@ -157,6 +198,8 @@ export default function ProjectPage({
             ⏸ Пауза
           </button>
         )}
+
+        {/* Resume */}
         {(state.status === "paused" || state.status === "paused_at_gate") && (
           <button
             onClick={() => sendAction("resume")}
@@ -168,7 +211,7 @@ export default function ProjectPage({
         )}
 
         {/* Stop */}
-        {(state.status === "running" || state.status === "paused" || state.status === "paused_at_gate") && (
+        {(state.status === "running" || state.status === "paused" || state.status === "paused_at_gate" || state.status === "created") && (
           <button
             onClick={() => sendAction("stop")}
             disabled={actionLoading !== null}
@@ -231,6 +274,24 @@ export default function ProjectPage({
           </div>
         )}
       </div>
+
+      {/* Created banner */}
+      {state.status === "created" && (
+        <div className="mb-6 rounded-xl border border-indigo-800/40 bg-indigo-950/20 p-5">
+          <h3 className="text-base font-semibold text-indigo-400 mb-2">
+            📋 Проект создан
+          </h3>
+          <p className="text-sm text-gray-400 mb-3">
+            Пайплайн готов к запуску. Нажмите <strong className="text-indigo-300">«Запустить пайплайн»</strong> чтобы
+            начать выполнение с первого агента ({state.pipeline_graph.nodes[0]}).
+          </p>
+          <p className="text-xs text-gray-500">
+            Режим: {state.mode === "auto"
+              ? "🤖 Авто — агенты запускаются по цепочке до gate-точки"
+              : "👤 Ручной — пауза после каждого агента для вашего ревью"}
+          </p>
+        </div>
+      )}
 
       {/* Stats Bar */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
