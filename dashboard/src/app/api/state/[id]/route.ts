@@ -10,6 +10,7 @@ import {
   runNextAgent,
   startPipeline,
   restartAgent,
+  reactivateToGate,
 } from "@/lib/state";
 import type { GateType, GateDecisionValue, PipelineMode } from "@/lib/types";
 
@@ -71,6 +72,12 @@ export async function POST(
   if (body.action === "start_pipeline") {
     const result = startPipeline(id);
     return NextResponse.json(result, { status: result.ok ? 200 : 400 });
+  }
+
+  if (body.action === "reactivate_gate") {
+    const ok = reactivateToGate(id);
+    if (!ok) return NextResponse.json({ error: "Нет непройденных gate-точек" }, { status: 400 });
+    return NextResponse.json({ ok: true });
   }
 
   if (body.action === "restart_agent" && body.agentId) {

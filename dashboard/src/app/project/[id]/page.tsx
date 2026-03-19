@@ -308,6 +308,26 @@ export default function ProjectPage({
         )}
       </div>
 
+      {/* Completed but has unresolved gates — show reactivate button */}
+      {state.status === "completed" && Object.keys(state.gate_decisions).length === 0 && (
+        <div className="mb-6 rounded-xl border border-amber-800/40 bg-amber-950/20 p-5">
+          <h3 className="text-base font-semibold text-amber-400 mb-2">
+            🚦 Есть непройденные контрольные точки
+          </h3>
+          <p className="text-sm text-gray-400 mb-3">
+            Статическая цепочка агентов завершена. Для продолжения нужно пройти Gate-точку
+            и подтвердить разработку.
+          </p>
+          <button
+            onClick={() => sendAction("reactivate_gate")}
+            disabled={actionLoading !== null}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+          >
+            {actionLoading === "reactivate_gate" ? "⏳..." : "🚦 Перейти к Gate-решению"}
+          </button>
+        </div>
+      )}
+
       {/* Created banner */}
       {state.status === "created" && (
         <div className="mb-6 rounded-xl border border-indigo-800/40 bg-indigo-950/20 p-5">

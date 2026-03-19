@@ -302,6 +302,28 @@ function expandPipelineAfterGate1(state: ProjectState): void {
 }
 
 // ============================================================================
+// Активация gate для завершённых проектов (фикс для старых проектов)
+// ============================================================================
+
+export function reactivateToGate(id: string): boolean {
+  const state = getProjectState(id);
+  if (!state) return false;
+
+  // Проверяем, есть ли непройденный gate
+  const gate = checkGates(state);
+  if (gate) {
+    state.status = "paused_at_gate";
+    state.current_gate = gate;
+    state.updated_at = new Date().toISOString();
+    const fp = path.join(STATE_DIR, `${id}.json`);
+    fs.writeFileSync(fp, JSON.stringify(state, null, 2), "utf-8");
+    return true;
+  }
+
+  return false;
+}
+
+// ============================================================================
 // Переключение режима
 // ============================================================================
 
