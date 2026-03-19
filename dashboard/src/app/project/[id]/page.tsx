@@ -90,11 +90,44 @@ export default function ProjectPage({
     [id, fetchState, router]
   );
 
+  // Auto-advance: when agent completes in auto mode, launch next
+  const autoAdvance = useCallback(async () => {
+    const res = await fetch(`/api/state/${id}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    setState(data);
+
+    if (data.status !== "running" || data.mode !== "auto") return;
+
+    // Check if there's already a running agent
+    const hasRunning = Object.values(data.agents as Record<string, {status: string}>)
+      .some((a) => a.status === "running");
+    if (hasRunning) return;
+
+    // Check if there are ready agents to launch
+    const hasReady = (data.pipeline_graph.nodes as string[]).some((nodeId: string) => {
+      const agent = data.agents[nodeId];
+      if (!agent || agent.status !== "pending") return false;
+      const deps = (data.pipeline_graph.edges as [string, string][])
+        .filter(([, tgt]: [string, string]) => tgt === nodeId)
+        .map(([src]: [string, string]) => src);
+      return deps.every((d: string) => data.agents[d]?.status === "completed");
+    });
+
+    if (hasReady) {
+      await fetch(`/api/state/${id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "run_next" }),
+      });
+    }
+  }, [id]);
+
   useEffect(() => {
     fetchState();
-    const interval = setInterval(fetchState, 3000);
+    const interval = setInterval(autoAdvance, 3000);
     return () => clearInterval(interval);
-  }, [fetchState]);
+  }, [fetchState, autoAdvance]);
 
   if (error) {
     return (
@@ -347,6 +380,35 @@ export default function ProjectPage({
           />
         </div>
       )}
+
+      {/* Running agent indicator */}
+      {Object.entries(state.agents)
+        .filter(([, a]) => a.status === "running")
+        .map(([agentId]) => (
+          <div
+            key={agentId}
+            className="mb-6 rounded-xl border border-blue-800/40 bg-blue-950/20 p-4 flex items-center gap-3"
+          >
+            <span className="relative flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500" />
+            </span>
+            <div>
+              <span className="text-blue-400 font-medium text-sm">
+                Агент работает: {agentId}
+              </span>
+              <span className="text-gray-500 text-xs ml-2">
+                Это может занять несколько минут...
+              </span>
+            </div>
+            <a
+              href={`/project/${id}/agent/${agentId}`}
+              className="ml-auto text-xs text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              Открыть →
+            </a>
+          </div>
+        ))}
 
       {/* Pipeline Graph */}
       <div className="mb-6">

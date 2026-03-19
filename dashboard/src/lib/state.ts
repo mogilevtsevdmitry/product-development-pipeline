@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { execFileSync } from "child_process";
+import { spawn } from "child_process";
 import type { ProjectState, GateType, GateDecisionValue } from "./types";
 
 const STATE_DIR = path.resolve(
@@ -384,7 +384,95 @@ function collectInputContext(
 }
 
 /**
- * Запуск одного агента через Claude CLI.
+ * Собрать промпт, записать в файл, вернуть путь.
+ */
+function prepareAgentPrompt(
+  agentId: string,
+  state: ProjectState,
+  outputDir: string
+): string {
+  const agentDir = path.join(AGENTS_DIR, AGENT_DIRS[agentId] || agentId);
+  let systemPrompt = "";
+  let rules = "";
+  try { systemPrompt = fs.readFileSync(path.join(agentDir, "system-prompt.md"), "utf-8"); } catch { /* */ }
+  try { rules = fs.readFileSync(path.join(agentDir, "rules.md"), "utf-8"); } catch { /* */ }
+
+  const context = collectInputContext(agentId, state);
+
+  const fullPrompt = [
+    systemPrompt,
+    rules ? `\n\n# Правила\n\n${rules}` : "",
+    context ? `\n\n# Входные данные\n\n${context}` : "",
+    `\n\n# Инструкции по сохранению\n\nСохрани все выходные артефакты в директорию: ${outputDir}\nФормат: Markdown (.md файлы).`,
+  ].join("");
+
+  const tmpFile = path.join(os.tmpdir(), `agent-prompt-${agentId}-${Date.now()}.md`);
+  fs.writeFileSync(tmpFile, fullPrompt, "utf-8");
+  return tmpFile;
+}
+
+/**
+ * Собрать артефакты из директории агента.
+ */
+function collectArtifacts(outputDir: string, projectDir: string): string[] {
+  const artifacts: string[] = [];
+  function walk(dir: string) {
+    if (!fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(".md")) {
+        artifacts.push(path.relative(projectDir, full));
+      }
+    }
+  }
+  walk(outputDir);
+  return artifacts;
+}
+
+/**
+ * Обновить state после завершения агента.
+ */
+function finalizeAgent(
+  id: string,
+  agentId: string,
+  success: boolean,
+  errorMsg?: string
+): void {
+  const state = getProjectState(id);
+  if (!state) return;
+
+  const phase = AGENT_PHASES[agentId] || "other";
+  const outputDir = path.join(PROJECTS_DIR, id, phase, agentId);
+  const projectDir = path.join(PROJECTS_DIR, id);
+
+  if (success) {
+    state.agents[agentId].status = "completed";
+    state.agents[agentId].artifacts = collectArtifacts(outputDir, projectDir);
+    state.agents[agentId].error = null;
+  } else {
+    state.agents[agentId].status = "failed";
+    state.agents[agentId].error = errorMsg || "Неизвестная ошибка";
+  }
+  state.agents[agentId].completed_at = new Date().toISOString();
+  state.updated_at = new Date().toISOString();
+
+  // Проверяем завершённость пайплайна
+  const allDone = state.pipeline_graph.nodes.every((n) => {
+    const s = state.agents[n]?.status;
+    return s === "completed" || s === "skipped";
+  });
+  if (allDone) state.status = "completed";
+  if (!success) state.status = "failed";
+
+  const fp = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(fp, JSON.stringify(state, null, 2), "utf-8");
+}
+
+/**
+ * Запуск следующего агента — НЕ БЛОКИРУЕТ.
+ * Ставит агента в running, спавнит процесс в фоне, возвращает управление сразу.
+ * Процесс по завершении обновляет state JSON.
  */
 export function runNextAgent(id: string): {
   ok: boolean;
@@ -393,190 +481,118 @@ export function runNextAgent(id: string): {
 } {
   const state = getProjectState(id);
   if (!state) return { ok: false, error: "Проект не найден" };
-  if (state.status !== "running" && state.status !== "created") {
+
+  // Если уже есть running агент — не запускаем второго
+  const alreadyRunning = Object.entries(state.agents).find(
+    ([, a]) => a.status === "running"
+  );
+  if (alreadyRunning) {
+    return { ok: true, agentId: alreadyRunning[0], error: `Агент ${alreadyRunning[0]} уже работает` };
+  }
+
+  if (state.status !== "running" && state.status !== "created" && state.status !== "paused") {
     return { ok: false, error: `Нельзя запускать агентов в статусе: ${state.status}` };
   }
 
   // Если created → переводим в running
-  if (state.status === "created") {
+  if (state.status === "created" || state.status === "paused") {
     state.status = "running";
   }
 
   const ready = findReadyAgents(state);
   if (ready.length === 0) {
-    // Проверяем, завершён ли пайплайн
-    const allDone = state.pipeline_graph.nodes.every(
-      (n) => {
-        const s = state.agents[n]?.status;
-        return s === "completed" || s === "skipped";
-      }
-    );
+    const allDone = state.pipeline_graph.nodes.every((n) => {
+      const s = state.agents[n]?.status;
+      return s === "completed" || s === "skipped";
+    });
     if (allDone) {
       state.status = "completed";
       state.updated_at = new Date().toISOString();
       const fp = path.join(STATE_DIR, `${id}.json`);
       fs.writeFileSync(fp, JSON.stringify(state, null, 2), "utf-8");
-      return { ok: true, agentId: undefined, error: "Пайплайн завершён" };
+      return { ok: true, error: "Пайплайн завершён" };
     }
+    state.updated_at = new Date().toISOString();
+    const fp = path.join(STATE_DIR, `${id}.json`);
+    fs.writeFileSync(fp, JSON.stringify(state, null, 2), "utf-8");
     return { ok: false, error: "Нет готовых агентов (ожидают зависимости или gate)" };
   }
 
   const agentId = ready[0];
   const now = new Date().toISOString();
 
-  // Mark running
+  // Mark running + save state BEFORE spawning
   state.agents[agentId].status = "running";
   state.agents[agentId].started_at = now;
+  state.agents[agentId].error = null;
   state.updated_at = now;
   const stateFile = path.join(STATE_DIR, `${id}.json`);
   fs.writeFileSync(stateFile, JSON.stringify(state, null, 2), "utf-8");
 
-  // Load prompts
-  const agentDir = path.join(AGENTS_DIR, AGENT_DIRS[agentId] || agentId);
-  let systemPrompt = "";
-  let rules = "";
-  try {
-    systemPrompt = fs.readFileSync(path.join(agentDir, "system-prompt.md"), "utf-8");
-  } catch { /* skip */ }
-  try {
-    rules = fs.readFileSync(path.join(agentDir, "rules.md"), "utf-8");
-  } catch { /* skip */ }
-
-  const context = collectInputContext(agentId, state);
-
-  // Output dir
+  // Prepare prompt file + output dir
   const phase = AGENT_PHASES[agentId] || "other";
   const outputDir = path.join(PROJECTS_DIR, id, phase, agentId);
   fs.mkdirSync(outputDir, { recursive: true });
+  const tmpFile = prepareAgentPrompt(agentId, state, outputDir);
 
-  // Build prompt
-  const fullPrompt = [
-    systemPrompt,
-    rules ? `\n\n# Правила\n\n${rules}` : "",
-    context ? `\n\n# Входные данные\n\n${context}` : "",
-    `\n\n# Инструкции по сохранению\n\nСохрани все выходные артефакты в директорию: ${outputDir}\nФормат: Markdown (.md файлы).`,
-  ].join("");
-
-  // Write prompt to temp file and pass via stdin to avoid arg length limits
-  const tmpFile = path.join(os.tmpdir(), `agent-prompt-${agentId}-${Date.now()}.md`);
-  fs.writeFileSync(tmpFile, fullPrompt, "utf-8");
-
-  try {
-    // claude --print --dangerously-skip-permissions "prompt"
-    // -p is alias for --print, NOT for passing prompt
-    // prompt is a positional argument, but can be too long for argv
-    // so we pipe it via stdin using shell redirect
-    execFileSync(
-      "/bin/sh",
-      [
-        "-c",
-        `cat "${tmpFile}" | claude --print --dangerously-skip-permissions`,
-      ],
-      {
-        cwd: outputDir,
-        timeout: 600_000,
-        stdio: "pipe",
-        maxBuffer: 50 * 1024 * 1024,
-      }
-    );
-  } catch (err) {
-    // Clean up temp file
-    try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
-    // Agent failed
-    const reloadedState = getProjectState(id)!;
-    reloadedState.agents[agentId].status = "failed";
-    reloadedState.agents[agentId].completed_at = new Date().toISOString();
-    reloadedState.agents[agentId].error = err instanceof Error ? err.message : String(err);
-    reloadedState.updated_at = new Date().toISOString();
-    fs.writeFileSync(stateFile, JSON.stringify(reloadedState, null, 2), "utf-8");
-    return { ok: false, agentId, error: `Агент ${agentId} завершился с ошибкой` };
-  }
-
-  // Clean up temp file
-  try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
-
-  // Collect output artifacts
-  const artifacts: string[] = [];
-  const projectDir = path.join(PROJECTS_DIR, id);
-  function walk(dir: string) {
-    if (!fs.existsSync(dir)) return;
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isDirectory()) walk(path.join(dir, entry.name));
-      else if (entry.name.endsWith(".md")) {
-        artifacts.push(path.relative(projectDir, path.join(dir, entry.name)));
-      }
-    }
-  }
-  walk(outputDir);
-
-  // Update state
-  const finalState = getProjectState(id)!;
-  finalState.agents[agentId].status = "completed";
-  finalState.agents[agentId].completed_at = new Date().toISOString();
-  finalState.agents[agentId].artifacts = artifacts;
-  finalState.agents[agentId].error = null;
-  finalState.updated_at = new Date().toISOString();
-
-  // Check if pipeline is complete
-  const allDone = finalState.pipeline_graph.nodes.every(
-    (n) => {
-      const s = finalState.agents[n]?.status;
-      return s === "completed" || s === "skipped";
+  // Spawn Claude in background — does NOT block the API
+  const child = spawn(
+    "/bin/sh",
+    ["-c", `cat "${tmpFile}" | claude --print --dangerously-skip-permissions`],
+    {
+      cwd: outputDir,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: false,
     }
   );
-  if (allDone) {
-    finalState.status = "completed";
-  }
 
-  fs.writeFileSync(stateFile, JSON.stringify(finalState, null, 2), "utf-8");
+  let stderr = "";
+  child.stderr?.on("data", (chunk: Buffer) => {
+    stderr += chunk.toString();
+  });
+
+  child.on("close", (code) => {
+    // Cleanup temp file
+    try { fs.unlinkSync(tmpFile); } catch { /* */ }
+
+    if (code === 0) {
+      finalizeAgent(id, agentId, true);
+    } else {
+      finalizeAgent(id, agentId, false, stderr || `Процесс завершился с кодом ${code}`);
+    }
+  });
+
+  child.on("error", (err) => {
+    try { fs.unlinkSync(tmpFile); } catch { /* */ }
+    finalizeAgent(id, agentId, false, err.message);
+  });
+
+  // Не ждём — возвращаем управление сразу
   return { ok: true, agentId };
 }
 
 /**
- * Запустить все готовые агенты по цепочке (auto-режим).
- * Запускает по одному, пока есть готовые.
+ * Запустить пайплайн.
+ * В auto — ставит статус running, запускает первого агента.
+ * Следующие агенты запускаются через polling (UI нажимает run_next или авто).
  */
 export function startPipeline(id: string): {
   ok: boolean;
-  ran: string[];
+  agentId?: string;
   error?: string;
 } {
   const state = getProjectState(id);
-  if (!state) return { ok: false, ran: [], error: "Проект не найден" };
+  if (!state) return { ok: false, error: "Проект не найден" };
 
-  if (state.status === "created") {
+  if (state.status === "created" || state.status === "paused") {
     state.status = "running";
     state.updated_at = new Date().toISOString();
     const fp = path.join(STATE_DIR, `${id}.json`);
     fs.writeFileSync(fp, JSON.stringify(state, null, 2), "utf-8");
   }
 
-  const ran: string[] = [];
-
-  while (true) {
-    const current = getProjectState(id);
-    if (!current) break;
-    if (current.status !== "running") break;
-
-    const ready = findReadyAgents(current);
-    if (ready.length === 0) break;
-
-    const result = runNextAgent(id);
-    if (result.agentId) ran.push(result.agentId);
-    if (!result.ok) break;
-
-    // В human_approval режиме — остановка после каждого
-    if (current.mode === "human_approval") {
-      const updated = getProjectState(id)!;
-      updated.status = "paused";
-      updated.updated_at = new Date().toISOString();
-      const fp = path.join(STATE_DIR, `${id}.json`);
-      fs.writeFileSync(fp, JSON.stringify(updated, null, 2), "utf-8");
-      break;
-    }
-  }
-
-  return { ok: true, ran };
+  // Запускаем первого готового агента
+  return runNextAgent(id);
 }
 
 // ============================================================================
