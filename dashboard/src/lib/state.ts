@@ -32,7 +32,79 @@ export function getProjectState(id: string): ProjectState | null {
   const filePath = path.join(STATE_DIR, `${id}.json`);
   if (!fs.existsSync(filePath)) return null;
   const raw = fs.readFileSync(filePath, "utf-8");
-  return JSON.parse(raw) as ProjectState;
+  const state = JSON.parse(raw) as ProjectState;
+
+  // Auto-recover stuck agents: running for >10 min with no process
+  let stateChanged = false;
+  const now = Date.now();
+  const STUCK_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+  for (const [agentId, agent] of Object.entries(state.agents)) {
+    if (agent.status !== "running" || !agent.started_at) continue;
+
+    const elapsed = now - new Date(agent.started_at).getTime();
+    if (elapsed < STUCK_TIMEOUT_MS) continue;
+
+    // Check if output file exists — agent may have completed but callback missed
+    const phase = getAgentPhase(agentId);
+    const outDir = path.join(PROJECTS_DIR, id, phase, agentId);
+    const outputFile = path.join(outDir, `${agentId}-output.md`);
+
+    if (fs.existsSync(outputFile) && fs.statSync(outputFile).size > 0) {
+      // Agent completed but callback was lost — recover
+      agent.status = "completed";
+      agent.completed_at = new Date(fs.statSync(outputFile).mtimeMs).toISOString();
+      agent.artifacts = collectArtifacts(outDir, path.join(PROJECTS_DIR, id));
+      stateChanged = true;
+    } else {
+      // No output — check if process is still alive
+      const pidFile = path.join(outDir, "_pid");
+      let processAlive = false;
+      if (fs.existsSync(pidFile)) {
+        try {
+          const pid = parseInt(fs.readFileSync(pidFile, "utf-8").trim());
+          process.kill(pid, 0); // check if process exists
+          processAlive = true;
+        } catch {
+          processAlive = false;
+        }
+      }
+
+      if (!processAlive) {
+        // Process gone, no output — mark as failed
+        agent.status = "failed";
+        agent.completed_at = new Date().toISOString();
+        agent.error = "Процесс агента завершился без результата (таймаут или сбой)";
+        stateChanged = true;
+      }
+    }
+  }
+
+  if (stateChanged) {
+    state.updated_at = new Date().toISOString();
+    fs.writeFileSync(filePath, JSON.stringify(state, null, 2));
+  }
+
+  return state;
+}
+
+function getAgentPhase(agentId: string): string {
+  const phaseMap: Record<string, string> = {
+    "pipeline-architect": "meta", "orchestrator": "meta",
+    "problem-researcher": "research", "market-researcher": "research",
+    "product-owner": "product", "business-analyst": "product",
+    "legal-compliance": "legal",
+    "ux-ui-designer": "design",
+    "system-architect": "development", "tech-lead": "development",
+    "backend-developer": "development", "frontend-developer": "development",
+    "devops-engineer": "development",
+    "qa-engineer": "quality", "security-engineer": "quality",
+    "release-manager": "release",
+    "product-marketer": "marketing", "smm-manager": "marketing",
+    "content-creator": "marketing",
+    "customer-support": "feedback", "data-analyst": "feedback",
+  };
+  return phaseMap[agentId] || "unknown";
 }
 
 export interface ProjectSummary {
@@ -1153,6 +1225,11 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
       detached: false,
     }
   );
+
+  // Save PID for stuck-process detection
+  try {
+    fs.writeFileSync(path.join(outputDir, "_pid"), String(child.pid || ""));
+  } catch { /* ignore */ }
 
   let stdout = "";
   let stderr = "";
