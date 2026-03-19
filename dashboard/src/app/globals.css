@@ -157,8 +157,11 @@ body {
 }
 
 .prose table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
 }
 
 .prose th, .prose td {
