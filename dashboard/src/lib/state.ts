@@ -1081,7 +1081,7 @@ function collectArtifacts(outputDir: string, projectDir: string): string[] {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
       else if (
-        (entry.name.endsWith(".md") || entry.name.endsWith(".pen") || entry.name.endsWith(".json"))
+        (entry.name.endsWith(".md") || entry.name.endsWith(".pen") || entry.name.endsWith(".json") || entry.name.endsWith(".png"))
         && !entry.name.startsWith("_")
       ) {
         artifacts.push(path.relative(projectDir, full));
