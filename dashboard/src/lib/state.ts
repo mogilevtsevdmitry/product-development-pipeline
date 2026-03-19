@@ -383,10 +383,14 @@ function applyParsedGraph(
     }
   }
 
-  // Remove agents no longer in graph (cleanup after PA rebuild)
+  // Remove only pending/failed agents no longer in graph (keep completed)
   for (const agentId of Object.keys(state.agents)) {
     if (!state.pipeline_graph.nodes.includes(agentId) && !staticChain.has(agentId)) {
-      delete state.agents[agentId];
+      const status = state.agents[agentId]?.status;
+      if (status === "pending" || status === "failed") {
+        delete state.agents[agentId];
+      }
+      // completed/running agents stay — their work is done, artifacts exist
     }
   }
 }
