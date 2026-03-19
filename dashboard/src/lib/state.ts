@@ -366,15 +366,39 @@ export function pauseProject(id: string): boolean {
 export function resumeProject(id: string): boolean {
   const state = getProjectState(id);
   if (!state) return false;
-  if (state.status !== "paused" && state.status !== "paused_at_gate") return false;
 
-  state.status = "running";
-  state.current_gate = null;
-  state.updated_at = new Date().toISOString();
+  if (state.status === "stopped" || state.status === "failed" || state.status === "completed") {
+    // Reactivate: un-skip agents that were skipped, set to running
+    for (const agent of Object.values(state.agents)) {
+      if (agent.status === "skipped") {
+        agent.status = "pending";
+      }
+    }
+    // Check if there's an unresolved gate
+    const gate = checkGates(state);
+    if (gate) {
+      state.status = "paused_at_gate";
+      state.current_gate = gate;
+    } else {
+      state.status = "running";
+      state.current_gate = null;
+    }
+    state.updated_at = new Date().toISOString();
+    const filePath = path.join(STATE_DIR, `${id}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+    return true;
+  }
 
-  const filePath = path.join(STATE_DIR, `${id}.json`);
-  fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
-  return true;
+  if (state.status === "paused" || state.status === "paused_at_gate") {
+    state.status = "running";
+    state.current_gate = null;
+    state.updated_at = new Date().toISOString();
+    const filePath = path.join(STATE_DIR, `${id}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+    return true;
+  }
+
+  return false;
 }
 
 // ============================================================================

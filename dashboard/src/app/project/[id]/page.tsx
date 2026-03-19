@@ -241,14 +241,18 @@ export default function ProjectPage({
           </button>
         )}
 
-        {/* Resume */}
-        {(state.status === "paused" || state.status === "paused_at_gate") && (
+        {/* Resume — for paused, stopped, failed, completed */}
+        {(state.status === "paused" || state.status === "paused_at_gate" || state.status === "stopped" || state.status === "failed" || state.status === "completed") && (
           <button
             onClick={() => sendAction("resume")}
             disabled={actionLoading !== null}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-emerald-600/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 transition-colors disabled:opacity-50"
           >
-            ▶ Возобновить
+            {state.status === "stopped" || state.status === "failed"
+              ? "🔄 Вернуть в работу"
+              : state.status === "completed"
+              ? "🔄 Продолжить пайплайн"
+              : "▶ Возобновить"}
           </button>
         )}
 
