@@ -309,6 +309,11 @@ function applyParsedGraph(
   nodes: string[],
   edges: [string, string][]
 ): void {
+  // Filter out disabled agents
+  const disabled = getDisabledAgents();
+  nodes = nodes.filter((n) => !disabled.has(n));
+  edges = edges.filter(([s, t]) => !disabled.has(s) && !disabled.has(t));
+
   // Always keep static chain + pipeline-architect
   const keepNodes = new Set([
     "problem-researcher", "market-researcher", "product-owner",
@@ -344,6 +349,10 @@ function buildGraphFromAgentList(
   state: ProjectState,
   agents: string[]
 ): void {
+  // Filter out disabled agents
+  const disabled = getDisabledAgents();
+  agents = agents.filter((a) => !disabled.has(a));
+
   const has = (id: string) => agents.includes(id);
   const nodes = new Set([
     "problem-researcher", "market-researcher", "product-owner",
@@ -572,6 +581,24 @@ export function stopProject(id: string): boolean {
 // ============================================================================
 
 const AGENTS_DIR = path.resolve(process.cwd(), "..", "agents");
+const AGENTS_CONFIG_PATH = path.join(AGENTS_DIR, "agents-config.json");
+
+/**
+ * Read disabled agent IDs from agents-config.json.
+ */
+function getDisabledAgents(): Set<string> {
+  if (!fs.existsSync(AGENTS_CONFIG_PATH)) return new Set();
+  try {
+    const config = JSON.parse(fs.readFileSync(AGENTS_CONFIG_PATH, "utf-8"));
+    return new Set(
+      Object.entries(config)
+        .filter(([, v]) => (v as { enabled?: boolean }).enabled === false)
+        .map(([k]) => k)
+    );
+  } catch {
+    return new Set();
+  }
+}
 
 const AGENT_DIRS: Record<string, string> = {
   "problem-researcher": "research/problem-researcher",

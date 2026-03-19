@@ -46,6 +46,7 @@ export default function AgentEditPage() {
   const [editingSkill, setEditingSkill] = useState<string | null>(null);
   const [newSkillName, setNewSkillName] = useState("");
   const [showNewSkill, setShowNewSkill] = useState(false);
+  const [enabled, setEnabled] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -57,6 +58,14 @@ export default function AgentEditPage() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
+    // Also load enabled status
+    fetch("/api/agents")
+      .then((r) => r.json())
+      .then((d) => {
+        const found = (d.agents || []).find((a: { id: string }) => a.id === name);
+        if (found) setEnabled(found.enabled);
+      })
+      .catch(() => {});
   }, [name]);
 
   useEffect(() => {
@@ -225,13 +234,42 @@ export default function AgentEditPage() {
       {/* Header */}
       <div className="flex items-start justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold">{displayName}</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold">{displayName}</h1>
+            {!enabled && (
+              <span className="text-xs bg-gray-700 text-gray-400 px-2 py-1 rounded">
+                Отключён
+              </span>
+            )}
+          </div>
           {role && <p className="text-gray-400 mt-1">{role}</p>}
           <p className="text-sm text-gray-500 mt-1">
             Фаза: {PHASE_LABELS[agent.phase] || agent.phase} &bull;{" "}
             {agent.skills.length} скилл{agent.skills.length !== 1 ? "ов" : ""}
           </p>
         </div>
+        <button
+          onClick={async () => {
+            const newVal = !enabled;
+            await fetch("/api/agents", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "toggle",
+                agentId: name,
+                enabled: newVal,
+              }),
+            });
+            setEnabled(newVal);
+          }}
+          className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+            enabled
+              ? "bg-yellow-600/20 text-yellow-400 hover:bg-yellow-600/30"
+              : "bg-green-600/20 text-green-400 hover:bg-green-600/30"
+          }`}
+        >
+          {enabled ? "Отключить" : "Включить"}
+        </button>
       </div>
 
       {/* Tabs */}

@@ -1,8 +1,18 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 
 const AGENTS_DIR = path.resolve(process.cwd(), "..", "agents");
+const CONFIG_PATH = path.join(AGENTS_DIR, "agents-config.json");
+
+interface AgentConfig {
+  enabled: boolean;
+  phase: string;
+  path: string;
+  name: string;
+  role: string;
+  automation_level: string;
+}
 
 interface AgentInfo {
   id: string;
@@ -10,36 +20,28 @@ interface AgentInfo {
   phase: string;
   role: string;
   automationLevel: string;
+  enabled: boolean;
   hasSystemPrompt: boolean;
   hasRules: boolean;
   skillsCount: number;
 }
 
-function parseYamlFrontmatter(content: string): Record<string, string> {
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) return {};
-  const result: Record<string, string> = {};
-  for (const line of match[1].split("\n")) {
-    const idx = line.indexOf(":");
-    if (idx > 0) {
-      const key = line.slice(0, idx).trim();
-      let val = line.slice(idx + 1).trim();
-      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-        val = val.slice(1, -1);
-      }
-      result[key] = val;
-    }
-  }
-  return result;
+function readConfig(): Record<string, AgentConfig> {
+  if (!fs.existsSync(CONFIG_PATH)) return {};
+  return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
+}
+
+function writeConfig(config: Record<string, AgentConfig>) {
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
 }
 
 export async function GET() {
   const agents: AgentInfo[] = [];
-
-  // Walk agents directory: agents/{phase}/{agent-name}/
   if (!fs.existsSync(AGENTS_DIR)) {
     return NextResponse.json({ agents: [] });
   }
+
+  const config = readConfig();
 
   const phases = fs.readdirSync(AGENTS_DIR, { withFileTypes: true })
     .filter(d => d.isDirectory());
@@ -63,17 +65,12 @@ export async function GET() {
         skillsCount = fs.readdirSync(skillsPath).filter(f => f.endsWith(".md")).length;
       }
 
-      let name = agentDir.name;
-      let role = "";
-      let automationLevel = "";
-
-      if (hasSystemPrompt) {
-        const content = fs.readFileSync(promptPath, "utf-8");
-        const fm = parseYamlFrontmatter(content);
-        if (fm.name) name = fm.name;
-        if (fm.role) role = fm.role;
-        if (fm.automation_level) automationLevel = fm.automation_level;
-      }
+      // Use config data if available, fall back to frontmatter
+      const cfg = config[agentDir.name];
+      const enabled = cfg?.enabled ?? true;
+      const name = cfg?.name || agentDir.name;
+      const role = cfg?.role || "";
+      const automationLevel = cfg?.automation_level || "";
 
       agents.push({
         id: agentDir.name,
@@ -81,6 +78,7 @@ export async function GET() {
         phase: phase.name,
         role,
         automationLevel,
+        enabled,
         hasSystemPrompt,
         hasRules,
         skillsCount,
@@ -88,7 +86,6 @@ export async function GET() {
     }
   }
 
-  // Sort by phase order
   const phaseOrder = ["meta", "research", "product", "legal", "design", "development", "quality", "release", "marketing", "feedback"];
   agents.sort((a, b) => {
     const ai = phaseOrder.indexOf(a.phase);
@@ -98,4 +95,127 @@ export async function GET() {
   });
 
   return NextResponse.json({ agents });
+}
+
+// POST /api/agents — create new agent or manage existing
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+  const { action } = body;
+
+  if (action === "toggle") {
+    // Toggle enabled/disabled
+    const { agentId, enabled } = body;
+    const config = readConfig();
+    if (config[agentId]) {
+      config[agentId].enabled = enabled;
+      writeConfig(config);
+      return NextResponse.json({ ok: true });
+    }
+    return NextResponse.json({ error: "Agent not found in config" }, { status: 404 });
+  }
+
+  if (action === "delete") {
+    // Delete agent (remove from config, optionally from disk)
+    const { agentId, deleteFiles } = body;
+    const config = readConfig();
+    if (!config[agentId]) {
+      return NextResponse.json({ error: "Agent not found" }, { status: 404 });
+    }
+
+    const agentPath = path.resolve(process.cwd(), "..", config[agentId].path);
+
+    // Remove from config
+    delete config[agentId];
+    writeConfig(config);
+
+    // Optionally remove files
+    if (deleteFiles && fs.existsSync(agentPath)) {
+      fs.rmSync(agentPath, { recursive: true, force: true });
+    }
+
+    return NextResponse.json({ ok: true });
+  }
+
+  if (action === "create") {
+    // Create new agent
+    const { agentId, name, phase, role } = body;
+
+    if (!agentId || !phase) {
+      return NextResponse.json({ error: "agentId and phase required" }, { status: 400 });
+    }
+
+    // Sanitize ID
+    const safeId = agentId.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-");
+
+    // Check if exists
+    const config = readConfig();
+    if (config[safeId]) {
+      return NextResponse.json({ error: "Agent already exists" }, { status: 409 });
+    }
+
+    // Create directory
+    const agentDir = path.join(AGENTS_DIR, phase, safeId);
+    fs.mkdirSync(path.join(agentDir, "skills"), { recursive: true });
+
+    // Create system-prompt.md
+    const promptContent = `---
+name: ${name || safeId}
+role: ${role || ""}
+phase: ${phase}
+automation_level: ""
+inputs: []
+outputs: []
+tools: []
+dependencies: []
+---
+
+# Роль
+
+${role || "Описание роли агента..."}
+
+# Инструкции
+
+1. ...
+
+# Формат выхода
+
+...
+`;
+    fs.writeFileSync(path.join(agentDir, "system-prompt.md"), promptContent, "utf-8");
+
+    // Create rules.md
+    const rulesContent = `---
+name: ${name || safeId} Rules
+type: constraints
+---
+
+# Обязательные правила
+
+- ...
+
+# Запреты
+
+- ...
+
+# Критерии завершения
+
+- ...
+`;
+    fs.writeFileSync(path.join(agentDir, "rules.md"), rulesContent, "utf-8");
+
+    // Add to config
+    config[safeId] = {
+      enabled: true,
+      phase,
+      path: `agents/${phase}/${safeId}`,
+      name: name || safeId,
+      role: role || "",
+      automation_level: "",
+    };
+    writeConfig(config);
+
+    return NextResponse.json({ ok: true, id: safeId });
+  }
+
+  return NextResponse.json({ error: "Unknown action" }, { status: 400 });
 }
