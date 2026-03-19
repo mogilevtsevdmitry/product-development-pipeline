@@ -70,9 +70,10 @@ function AgentNodeComponent({ id, data }: NodeProps) {
         className="!bg-gray-500 !w-2 !h-2 !border-0"
       />
 
-      {/* Hover controls */}
+      {/* Hover controls — extended hit area with bridge gap */}
       {showControls && (
-        <div className="absolute -top-9 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-gray-900 border border-gray-700 rounded-lg px-1.5 py-1 shadow-xl z-50">
+        <div className="absolute -top-10 left-1/2 -translate-x-1/2 pb-2 z-50">
+        <div className="flex items-center gap-1 bg-gray-900 border border-gray-700 rounded-lg px-1.5 py-1 shadow-xl">
           {status === "running" && (
             <button
               onClick={(e) => { e.stopPropagation(); sendAction("pause_agent"); }}
@@ -100,6 +101,7 @@ function AgentNodeComponent({ id, data }: NodeProps) {
               🔄
             </button>
           )}
+        </div>
         </div>
       )}
 
