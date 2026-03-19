@@ -40,12 +40,16 @@ const STATUS_STYLES: Record<string, { border: string; bg: string; dot: string }>
 };
 
 const PHASE_COLORS: Record<string, string> = {
-  discovery: "text-violet-400",
-  analysis: "text-blue-400",
-  strategy: "text-cyan-400",
+  research: "text-violet-400",
+  product: "text-blue-400",
+  meta: "text-cyan-400",
+  legal: "text-orange-400",
   design: "text-emerald-400",
-  validation: "text-amber-400",
-  gate: "text-amber-400",
+  development: "text-sky-400",
+  quality: "text-amber-400",
+  release: "text-rose-400",
+  marketing: "text-pink-400",
+  feedback: "text-teal-400",
 };
 
 function AgentNodeComponent({ data }: NodeProps) {

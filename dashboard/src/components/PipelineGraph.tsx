@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useEffect } from "react";
 import {
   ReactFlow,
   Background,
@@ -25,68 +25,153 @@ interface PipelineGraphProps {
 
 const nodeTypes = { agent: AgentNodeComponent };
 
-// Simple dagre-like layout: group nodes by phase, then position horizontally
+// Agent display names
+const AGENT_LABELS: Record<string, string> = {
+  "problem-researcher": "Problem Researcher",
+  "market-researcher": "Market Researcher",
+  "product-owner": "Product Owner",
+  "pipeline-architect": "Pipeline Architect",
+  "business-analyst": "Business Analyst",
+  "legal-compliance": "Legal / Compliance",
+  "ux-ui-designer": "UX/UI Designer",
+  "system-architect": "System Architect",
+  "tech-lead": "Tech Lead",
+  "backend-developer": "Backend Developer",
+  "frontend-developer": "Frontend Developer",
+  "devops-engineer": "DevOps Engineer",
+  "qa-engineer": "QA Engineer",
+  "security-engineer": "Security Engineer",
+  "release-manager": "Release Manager",
+  "product-marketer": "Product Marketer",
+  "smm-manager": "SMM Manager",
+  "content-creator": "Content Creator",
+  "customer-support": "Customer Support",
+  "data-analyst": "Data Analyst",
+  orchestrator: "Orchestrator",
+};
+
+// Agent phase mapping
+const AGENT_PHASES: Record<string, string> = {
+  "problem-researcher": "research",
+  "market-researcher": "research",
+  "product-owner": "product",
+  "pipeline-architect": "meta",
+  "business-analyst": "product",
+  "legal-compliance": "legal",
+  "ux-ui-designer": "design",
+  "system-architect": "development",
+  "tech-lead": "development",
+  "backend-developer": "development",
+  "frontend-developer": "development",
+  "devops-engineer": "development",
+  "qa-engineer": "quality",
+  "security-engineer": "quality",
+  "release-manager": "release",
+  "product-marketer": "marketing",
+  "smm-manager": "marketing",
+  "content-creator": "marketing",
+  "customer-support": "feedback",
+  "data-analyst": "feedback",
+  orchestrator: "meta",
+};
+
+const PHASE_ORDER = [
+  "research",
+  "product",
+  "meta",
+  "legal",
+  "design",
+  "development",
+  "quality",
+  "release",
+  "marketing",
+  "feedback",
+];
+
+/**
+ * Topological sort + column assignment based on dependency depth.
+ * Nodes at the same depth go in the same column.
+ */
 function layoutNodes(
   graph: PipelineGraphType,
   agents: Record<string, AgentState>
 ): { nodes: Node[]; edges: Edge[] } {
-  const phaseOrder = [
-    "discovery",
-    "analysis",
-    "gate",
-    "strategy",
-    "design",
-    "validation",
-  ];
+  const nodeIds = graph.nodes; // string[]
+  const edgePairs = graph.edges; // [string, string][]
 
-  // Group nodes by phase
-  const phaseGroups: Record<string, typeof graph.nodes> = {};
-  for (const node of graph.nodes) {
-    const phase = node.phase || "other";
-    if (!phaseGroups[phase]) phaseGroups[phase] = [];
-    phaseGroups[phase].push(node);
+  // Build adjacency: incoming edges per node
+  const incomingMap: Record<string, string[]> = {};
+  for (const id of nodeIds) incomingMap[id] = [];
+  for (const [src, tgt] of edgePairs) {
+    if (incomingMap[tgt]) incomingMap[tgt].push(src);
   }
 
-  // Sort phases
-  const sortedPhases = Object.keys(phaseGroups).sort((a, b) => {
-    const ai = phaseOrder.indexOf(a);
-    const bi = phaseOrder.indexOf(b);
-    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-  });
+  // Compute depth (longest path from root)
+  const depth: Record<string, number> = {};
+  function getDepth(id: string): number {
+    if (depth[id] !== undefined) return depth[id];
+    const deps = incomingMap[id] || [];
+    if (deps.length === 0) {
+      depth[id] = 0;
+    } else {
+      depth[id] = Math.max(...deps.map(getDepth)) + 1;
+    }
+    return depth[id];
+  }
+  for (const id of nodeIds) getDepth(id);
 
-  const X_GAP = 280;
-  const Y_GAP = 100;
+  // Group by depth (column)
+  const columns: Record<number, string[]> = {};
+  for (const id of nodeIds) {
+    const d = depth[id];
+    if (!columns[d]) columns[d] = [];
+    columns[d].push(id);
+  }
+
+  // Sort within column by phase order for consistency
+  for (const col of Object.values(columns)) {
+    col.sort((a, b) => {
+      const pa = PHASE_ORDER.indexOf(AGENT_PHASES[a] || "");
+      const pb = PHASE_ORDER.indexOf(AGENT_PHASES[b] || "");
+      return (pa === -1 ? 99 : pa) - (pb === -1 ? 99 : pb);
+    });
+  }
+
+  const X_GAP = 260;
+  const Y_GAP = 90;
 
   const flowNodes: Node[] = [];
+  const sortedCols = Object.keys(columns)
+    .map(Number)
+    .sort((a, b) => a - b);
 
-  sortedPhases.forEach((phase, colIdx) => {
-    const group = phaseGroups[phase];
-    const totalHeight = group.length * Y_GAP;
+  for (const colIdx of sortedCols) {
+    const col = columns[colIdx];
+    const totalHeight = col.length * Y_GAP;
     const startY = -totalHeight / 2 + Y_GAP / 2;
 
-    group.forEach((node, rowIdx) => {
-      const agentState = agents[node.id];
-      const status = agentState?.status ?? "pending";
+    for (let rowIdx = 0; rowIdx < col.length; rowIdx++) {
+      const id = col[rowIdx];
+      const status = agents[id]?.status ?? "pending";
 
       flowNodes.push({
-        id: node.id,
+        id,
         type: "agent",
         position: { x: colIdx * X_GAP, y: startY + rowIdx * Y_GAP },
         data: {
-          label: node.label,
-          phase: node.phase,
+          label: AGENT_LABELS[id] || id,
+          phase: AGENT_PHASES[id] || "other",
           status,
-          type: node.type || "agent",
         },
       });
-    });
-  });
+    }
+  }
 
-  const flowEdges: Edge[] = graph.edges.map((edge, i) => ({
-    id: `e-${i}-${edge.source}-${edge.target}`,
-    source: edge.source,
-    target: edge.target,
-    animated: agents[edge.source]?.status === "running",
+  const flowEdges: Edge[] = edgePairs.map(([source, target], i) => ({
+    id: `e-${i}-${source}-${target}`,
+    source,
+    target,
+    animated: agents[source]?.status === "running",
     style: { stroke: "#4b5563", strokeWidth: 2 },
   }));
 
@@ -100,20 +185,23 @@ export default function PipelineGraph({
 }: PipelineGraphProps) {
   const router = useRouter();
 
-  const { nodes: initialNodes, edges: initialEdges } = useMemo(
+  const { nodes: layoutedNodes, edges: layoutedEdges } = useMemo(
     () => layoutNodes(graph, agents),
     [graph, agents]
   );
 
-  const [nodes, , onNodesChange] = useNodesState(initialNodes);
-  const [edges, , onEdgesChange] = useEdgesState(initialEdges);
+  const [nodes, setNodes, onNodesChange] = useNodesState(layoutedNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(layoutedEdges);
+
+  // Sync when data changes (polling updates)
+  useEffect(() => {
+    setNodes(layoutedNodes);
+    setEdges(layoutedEdges);
+  }, [layoutedNodes, layoutedEdges, setNodes, setEdges]);
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
-      const data = node.data as Record<string, unknown>;
-      if (data.type !== "gate") {
-        router.push(`/project/${projectId}/agent/${node.id}`);
-      }
+      router.push(`/project/${projectId}/agent/${node.id}`);
     },
     [router, projectId]
   );
