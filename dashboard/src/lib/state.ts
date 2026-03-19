@@ -365,6 +365,11 @@ function applyParsedGraph(
     ...edges,
   ];
 
+  // Sync state.agents with graph nodes
+  const staticChain = new Set([
+    "problem-researcher", "market-researcher", "product-owner", "pipeline-architect",
+  ]);
+
   // Add state for new agents
   for (const nodeId of state.pipeline_graph.nodes) {
     if (!state.agents[nodeId]) {
@@ -375,6 +380,13 @@ function applyParsedGraph(
         artifacts: [],
         error: null,
       };
+    }
+  }
+
+  // Remove agents no longer in graph (cleanup after PA rebuild)
+  for (const agentId of Object.keys(state.agents)) {
+    if (!state.pipeline_graph.nodes.includes(agentId) && !staticChain.has(agentId)) {
+      delete state.agents[agentId];
     }
   }
 }
