@@ -32,6 +32,9 @@ export default function RootLayout({
               <a href="/" className="hover:text-white transition-colors">
                 Проекты
               </a>
+              <a href="/agents" className="hover:text-white transition-colors">
+                Агенты
+              </a>
             </nav>
           </div>
         </header>
