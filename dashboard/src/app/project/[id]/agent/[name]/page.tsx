@@ -259,47 +259,84 @@ export default function AgentDetailPage({
         </div>
 
         {/* Usage / Cost */}
-        {agent.usage && (
-          <div className="rounded-xl border border-gray-800 bg-gray-900 p-6">
-            <h3 className="font-semibold text-white mb-4">📊 Использование токенов</h3>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <div>
-                <div className="text-xs text-gray-500 mb-1">Стоимость</div>
-                <div className="text-lg font-bold text-amber-400">
-                  ${agent.usage.cost_usd.toFixed(4)}
+        {(agent.total_usage || agent.usage) && (() => {
+          const total = agent.total_usage || agent.usage!;
+          const history = agent.usage_history || [];
+          const runs = history.length || 1;
+          return (
+            <div className="rounded-xl border border-gray-800 bg-gray-900 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-white">📊 Использование токенов</h3>
+                {runs > 1 && (
+                  <span className="text-xs px-2 py-1 rounded bg-amber-900/30 text-amber-400 border border-amber-800">
+                    {runs} {runs < 5 ? "запуска" : "запусков"} (суммарно)
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">Общая стоимость</div>
+                  <div className="text-xl font-bold text-amber-400">
+                    ${total.cost_usd.toFixed(4)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">Общее время</div>
+                  <div className="text-xl font-bold text-blue-400">
+                    {total.duration_ms >= 60000
+                      ? `${(total.duration_ms / 60000).toFixed(1)}м`
+                      : `${(total.duration_ms / 1000).toFixed(1)}с`}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">Input tokens</div>
+                  <div className="text-sm text-gray-300">
+                    {total.input_tokens.toLocaleString()}
+                    {total.cache_creation_tokens > 0 && (
+                      <span className="text-xs text-gray-500 block">
+                        +{total.cache_creation_tokens.toLocaleString()} cache create
+                      </span>
+                    )}
+                    {total.cache_read_tokens > 0 && (
+                      <span className="text-xs text-gray-500 block">
+                        +{total.cache_read_tokens.toLocaleString()} cache read
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">Output tokens</div>
+                  <div className="text-sm text-gray-300">
+                    {total.output_tokens.toLocaleString()}
+                  </div>
                 </div>
               </div>
-              <div>
-                <div className="text-xs text-gray-500 mb-1">Длительность</div>
-                <div className="text-lg font-bold text-blue-400">
-                  {(agent.usage.duration_ms / 1000).toFixed(1)}с
+              {total.model && (
+                <div className="mt-3 text-xs text-gray-500">
+                  Модель: {total.model}
                 </div>
-              </div>
-              <div>
-                <div className="text-xs text-gray-500 mb-1">Input tokens</div>
-                <div className="text-sm text-gray-300">
-                  {agent.usage.input_tokens.toLocaleString()}
-                  {agent.usage.cache_creation_tokens > 0 && (
-                    <span className="text-xs text-gray-500 ml-1">
-                      +{agent.usage.cache_creation_tokens.toLocaleString()} cache
-                    </span>
-                  )}
+              )}
+
+              {/* Run history */}
+              {history.length > 1 && (
+                <div className="mt-4 border-t border-gray-800 pt-4">
+                  <div className="text-xs text-gray-500 mb-2">История запусков</div>
+                  <div className="space-y-1">
+                    {history.map((run, i) => (
+                      <div key={i} className="flex items-center justify-between text-xs text-gray-400 py-1 px-2 rounded bg-gray-800/50">
+                        <span className="text-gray-500">#{i + 1}</span>
+                        <span>${run.cost_usd.toFixed(4)}</span>
+                        <span>{(run.duration_ms / 1000).toFixed(1)}с</span>
+                        <span>↓{run.input_tokens.toLocaleString()}</span>
+                        <span>↑{run.output_tokens.toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <div>
-                <div className="text-xs text-gray-500 mb-1">Output tokens</div>
-                <div className="text-sm text-gray-300">
-                  {agent.usage.output_tokens.toLocaleString()}
-                </div>
-              </div>
+              )}
             </div>
-            {agent.usage.model && (
-              <div className="mt-3 text-xs text-gray-500">
-                Модель: {agent.usage.model}
-              </div>
-            )}
-          </div>
-        )}
+          );
+        })()}
 
         {/* Dependencies */}
         {dependencies.length > 0 && (

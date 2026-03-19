@@ -1076,9 +1076,27 @@ function finalizeAgent(
     state.agents[agentId].error = errorMsg || "Неизвестная ошибка";
   }
 
-  // Save usage/cost data
+  // Save usage/cost data — accumulate across restarts
   if (usage) {
     state.agents[agentId].usage = usage;
+
+    // Append to history
+    if (!state.agents[agentId].usage_history) {
+      state.agents[agentId].usage_history = [];
+    }
+    state.agents[agentId].usage_history!.push(usage);
+
+    // Recalculate total
+    const history = state.agents[agentId].usage_history!;
+    state.agents[agentId].total_usage = {
+      input_tokens: history.reduce((s, u) => s + u.input_tokens, 0),
+      output_tokens: history.reduce((s, u) => s + u.output_tokens, 0),
+      cache_creation_tokens: history.reduce((s, u) => s + u.cache_creation_tokens, 0),
+      cache_read_tokens: history.reduce((s, u) => s + u.cache_read_tokens, 0),
+      cost_usd: history.reduce((s, u) => s + u.cost_usd, 0),
+      duration_ms: history.reduce((s, u) => s + u.duration_ms, 0),
+      model: usage.model,
+    };
   }
   state.agents[agentId].completed_at = new Date().toISOString();
   state.updated_at = new Date().toISOString();

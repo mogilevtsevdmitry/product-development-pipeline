@@ -399,9 +399,12 @@ export default function ProjectPage({
         {/* Cost stats */}
         {(() => {
           const agents = Object.values(state.agents);
-          const totalCost = agents.reduce((s, a) => s + (a.usage?.cost_usd || 0), 0);
-          const totalTokensIn = agents.reduce((s, a) => s + (a.usage?.input_tokens || 0) + (a.usage?.cache_creation_tokens || 0) + (a.usage?.cache_read_tokens || 0), 0);
-          const totalTokensOut = agents.reduce((s, a) => s + (a.usage?.output_tokens || 0), 0);
+          const totalCost = agents.reduce((s, a) => s + ((a.total_usage || a.usage)?.cost_usd || 0), 0);
+          const totalTokensIn = agents.reduce((s, a) => {
+            const u = a.total_usage || a.usage;
+            return s + (u?.input_tokens || 0) + (u?.cache_creation_tokens || 0) + (u?.cache_read_tokens || 0);
+          }, 0);
+          const totalTokensOut = agents.reduce((s, a) => s + ((a.total_usage || a.usage)?.output_tokens || 0), 0);
           return (
             <>
               <div className="rounded-lg border border-gray-800 bg-gray-900 p-3">

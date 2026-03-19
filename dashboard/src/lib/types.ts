@@ -72,6 +72,8 @@ export interface AgentState {
   artifacts: string[];
   error?: string | null;
   usage?: AgentUsage | null;
+  usage_history?: AgentUsage[];  // all runs (including retries/restarts)
+  total_usage?: AgentUsage | null;  // sum of all runs
 }
 
 // --- Pipeline Graph ---
