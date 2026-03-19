@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getProjectState, resolveGate } from "@/lib/state";
-import type { GateType } from "@/lib/types";
+import { getProjectState, resolveGate, switchMode } from "@/lib/state";
+import type { GateType, GateDecisionValue, PipelineMode } from "@/lib/types";
 
 export async function GET(
   _request: NextRequest,
@@ -25,8 +25,22 @@ export async function POST(
 ) {
   const { id } = await params;
   const body = await request.json();
+
+  // Переключение режима
+  if (body.action === "switch_mode" && body.mode) {
+    const success = switchMode(id, body.mode as PipelineMode);
+    if (!success) {
+      return NextResponse.json(
+        { error: "Проект не найден" },
+        { status: 404 }
+      );
+    }
+    return NextResponse.json({ ok: true });
+  }
+
+  // Gate-решение
   const { gate, decision, notes } = body as {
-    gate: GateType;
+    gate: string;
     decision: string;
     notes?: string;
   };
@@ -38,7 +52,12 @@ export async function POST(
     );
   }
 
-  const success = resolveGate(id, gate, decision, notes);
+  const success = resolveGate(
+    id,
+    gate as GateType,
+    decision as GateDecisionValue,
+    notes
+  );
 
   if (!success) {
     return NextResponse.json(

@@ -16,71 +16,72 @@ export type ProjectStatus =
   | "failed";
 
 // --- Gate Decisions ---
+// Совпадает с Python orchestrator gates.py
 
-export type Gate1Decision = "go" | "pivot" | "stop";
-export type Gate2Decision = "go" | "narrow" | "stop";
-export type Gate3Decision = "go" | "iterate" | "stop";
+export type GateType =
+  | "gate_1_build"
+  | "gate_2_architecture"
+  | "gate_3_go_nogo";
 
-export type GateType = "gate_1" | "gate_2" | "gate_3";
+export type GateDecisionValue =
+  | "go"
+  | "pivot"
+  | "stop"
+  | "revise"
+  | "no-go"
+  | "rollback";
 
 export interface GateDecision {
-  gate: GateType;
-  decision: Gate1Decision | Gate2Decision | Gate3Decision;
+  decision: GateDecisionValue;
   decided_by: string;
-  decided_at: string;
+  timestamp: string;
   notes?: string;
 }
 
-// --- Agent State ---
+export const GATE_DECISIONS: Record<GateType, GateDecisionValue[]> = {
+  gate_1_build: ["go", "pivot", "stop"],
+  gate_2_architecture: ["go", "revise", "stop"],
+  gate_3_go_nogo: ["go", "no-go", "rollback"],
+};
 
-export interface AgentArtifact {
-  name: string;
-  path: string;
-  type?: string;
-}
+export const GATE_LABELS: Record<GateType, string> = {
+  gate_1_build: "Gate 1: Строим?",
+  gate_2_architecture: "Gate 2: Архитектура",
+  gate_3_go_nogo: "Gate 3: Go / No-go",
+};
+
+// --- Agent State ---
 
 export interface AgentState {
   status: AgentStatus;
-  phase?: string;
-  started_at?: string;
-  completed_at?: string;
-  artifacts: AgentArtifact[];
-  error?: string;
-  depends_on?: string[];
+  started_at?: string | null;
+  completed_at?: string | null;
+  artifacts: string[];
+  error?: string | null;
 }
 
 // --- Pipeline Graph ---
 
-export interface PipelineNode {
-  id: string;
-  label: string;
-  phase: string;
-  type?: "agent" | "gate";
-}
-
-export interface PipelineEdge {
-  source: string;
-  target: string;
-}
-
 export interface PipelineGraph {
-  nodes: PipelineNode[];
-  edges: PipelineEdge[];
-  parallel_groups?: Record<string, string[]>;
+  nodes: string[];
+  edges: [string, string][];
+  parallel_groups: string[][];
 }
 
 // --- Project State ---
+// Совпадает с Python orchestrator engine.py create_project()
 
 export interface ProjectState {
-  schema_version: string;
   project_id: string;
-  project_name: string;
-  mode: PipelineMode;
-  status: ProjectStatus;
-  current_gate?: GateType | null;
+  name: string;
+  description: string;
   created_at: string;
   updated_at: string;
+  mode: PipelineMode;
+  status: ProjectStatus;
+  current_gate: GateType | string | null;
   pipeline_graph: PipelineGraph;
   agents: Record<string, AgentState>;
-  gate_decisions: GateDecision[];
+  gate_decisions: Record<string, GateDecision | null>;
+  schema_version: number;
 }

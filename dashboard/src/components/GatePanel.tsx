@@ -5,43 +5,47 @@ import type { GateType } from "@/lib/types";
 
 const GATE_INFO: Record<
   GateType,
-  { title: string; description: string; decisions: { value: string; label: string; color: string }[] }
+  {
+    title: string;
+    description: string;
+    decisions: { value: string; label: string; color: string }[];
+  }
 > = {
-  gate_1: {
-    title: "Гейт 1 — Валидация проблемы",
+  gate_1_build: {
+    title: "🚦 Gate 1 — Строим?",
     description:
-      "Проверка гипотезы проблемы: достаточно ли данных, подтверждена ли потребность рынка?",
+      "Проблема реальна, рынок существует, есть смысл инвестировать в разработку?",
     decisions: [
-      { value: "go", label: "Go — Продолжить", color: "bg-emerald-600 hover:bg-emerald-500" },
-      { value: "pivot", label: "Pivot — Пересмотреть", color: "bg-amber-600 hover:bg-amber-500" },
-      { value: "stop", label: "Stop — Остановить", color: "bg-red-600 hover:bg-red-500" },
+      { value: "go", label: "✅ Строим", color: "bg-emerald-600 hover:bg-emerald-500" },
+      { value: "pivot", label: "🔄 Пивот", color: "bg-amber-600 hover:bg-amber-500" },
+      { value: "stop", label: "⛔ Стоп", color: "bg-red-600 hover:bg-red-500" },
     ],
   },
-  gate_2: {
-    title: "Гейт 2 — Валидация решения",
+  gate_2_architecture: {
+    title: "🏗️ Gate 2 — Архитектура",
     description:
-      "Проверка решения: жизнеспособна ли стратегия продукта, подтверждён ли product-market fit?",
+      "Техническое решение и дизайн утверждены? Архитектура соответствует требованиям, бюджету и срокам?",
     decisions: [
-      { value: "go", label: "Go — Продолжить", color: "bg-emerald-600 hover:bg-emerald-500" },
-      { value: "narrow", label: "Narrow — Сузить", color: "bg-amber-600 hover:bg-amber-500" },
-      { value: "stop", label: "Stop — Остановить", color: "bg-red-600 hover:bg-red-500" },
+      { value: "go", label: "✅ Утвердить", color: "bg-emerald-600 hover:bg-emerald-500" },
+      { value: "revise", label: "🔄 Доработать", color: "bg-amber-600 hover:bg-amber-500" },
+      { value: "stop", label: "⛔ Стоп", color: "bg-red-600 hover:bg-red-500" },
     ],
   },
-  gate_3: {
-    title: "Гейт 3 — Готовность к запуску",
+  gate_3_go_nogo: {
+    title: "🚀 Gate 3 — Go / No-go",
     description:
-      "Финальная проверка: готов ли продукт к MVP-запуску, все ли артефакты подготовлены?",
+      "Тесты пройдены, безопасность проверена, инфраструктура готова. Выкатываем в прод?",
     decisions: [
-      { value: "go", label: "Go — Запустить", color: "bg-emerald-600 hover:bg-emerald-500" },
-      { value: "iterate", label: "Iterate — Доработать", color: "bg-amber-600 hover:bg-amber-500" },
-      { value: "stop", label: "Stop — Остановить", color: "bg-red-600 hover:bg-red-500" },
+      { value: "go", label: "✅ Go — Релиз", color: "bg-emerald-600 hover:bg-emerald-500" },
+      { value: "no-go", label: "⏸️ No-go", color: "bg-amber-600 hover:bg-amber-500" },
+      { value: "rollback", label: "⛔ Rollback", color: "bg-red-600 hover:bg-red-500" },
     ],
   },
 };
 
 interface GatePanelProps {
   projectId: string;
-  gate: GateType;
+  gate: string;
   onDecision?: () => void;
 }
 
@@ -54,33 +58,52 @@ export default function GatePanel({
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  const info = GATE_INFO[gate];
-  if (!info) return null;
+  const info = GATE_INFO[gate as GateType];
 
-  const handleDecision = async (decision: string) => {
-    setSubmitting(true);
-    try {
-      const res = await fetch(`/api/state/${projectId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gate, decision, notes: notes || undefined }),
-      });
-      if (res.ok) {
-        setSubmitted(true);
-        onDecision?.();
-      }
-    } catch (err) {
-      console.error("Gate decision error:", err);
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  // Для approval-точек в режиме human_approval
+  if (!info) {
+    const agentName = gate.replace("approval_", "");
+    return (
+      <div className="rounded-xl border border-blue-800/60 bg-blue-950/20 p-6 space-y-4">
+        <div>
+          <h3 className="text-lg font-semibold text-blue-400">
+            👤 Подтверждение: {agentName}
+          </h3>
+          <p className="text-sm text-gray-400 mt-1">
+            Агент завершил работу. Подтвердите продолжение пайплайна.
+          </p>
+        </div>
+        <button
+          onClick={async () => {
+            setSubmitting(true);
+            try {
+              const res = await fetch(`/api/state/${projectId}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ gate, decision: "go" }),
+              });
+              if (res.ok) {
+                setSubmitted(true);
+                onDecision?.();
+              }
+            } finally {
+              setSubmitting(false);
+            }
+          }}
+          disabled={submitting || submitted}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+        >
+          {submitted ? "Продолжено ✓" : submitting ? "..." : "Продолжить →"}
+        </button>
+      </div>
+    );
+  }
 
   if (submitted) {
     return (
       <div className="rounded-xl border border-emerald-800 bg-emerald-950/30 p-6">
         <p className="text-emerald-400 font-medium">
-          Решение принято. Пайплайн продолжает работу.
+          ✅ Решение принято. Пайплайн продолжает работу.
         </p>
       </div>
     );
@@ -111,7 +134,26 @@ export default function GatePanel({
         {info.decisions.map((d) => (
           <button
             key={d.value}
-            onClick={() => handleDecision(d.value)}
+            onClick={async () => {
+              setSubmitting(true);
+              try {
+                const res = await fetch(`/api/state/${projectId}`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    gate,
+                    decision: d.value,
+                    notes: notes || undefined,
+                  }),
+                });
+                if (res.ok) {
+                  setSubmitted(true);
+                  onDecision?.();
+                }
+              } finally {
+                setSubmitting(false);
+              }
+            }}
             disabled={submitting}
             className={`px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors ${d.color} disabled:opacity-50 disabled:cursor-not-allowed`}
           >
