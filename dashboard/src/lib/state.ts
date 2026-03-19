@@ -45,16 +45,32 @@ export function getProjectState(id: string): ProjectState | null {
     const elapsed = now - new Date(agent.started_at).getTime();
     if (elapsed < STUCK_TIMEOUT_MS) continue;
 
-    // Check if output file exists — agent may have completed but callback missed
+    // Check if ANY output files exist — agent may have completed but callback missed
+    // Agents can create files via stdout capture ({agent}-output.md) OR via Claude Write tool
     const phase = getAgentPhase(agentId);
     const outDir = path.join(PROJECTS_DIR, id, phase, agentId);
-    const outputFile = path.join(outDir, `${agentId}-output.md`);
+    const projectDir = path.join(PROJECTS_DIR, id);
 
-    if (fs.existsSync(outputFile) && fs.statSync(outputFile).size > 0) {
+    // Check for any non-internal artifact files in the agent's output directory
+    let hasOutput = false;
+    let latestMtime = 0;
+    if (fs.existsSync(outDir)) {
+      for (const f of fs.readdirSync(outDir)) {
+        if (f.startsWith("_") || f === ".DS_Store") continue;  // skip internal files
+        const fp = path.join(outDir, f);
+        const stat = fs.statSync(fp);
+        if (stat.isFile() && stat.size > 0) {
+          hasOutput = true;
+          if (stat.mtimeMs > latestMtime) latestMtime = stat.mtimeMs;
+        }
+      }
+    }
+
+    if (hasOutput) {
       // Agent completed but callback was lost — recover
       agent.status = "completed";
-      agent.completed_at = new Date(fs.statSync(outputFile).mtimeMs).toISOString();
-      agent.artifacts = collectArtifacts(outDir, path.join(PROJECTS_DIR, id));
+      agent.completed_at = new Date(latestMtime).toISOString();
+      agent.artifacts = collectArtifacts(outDir, projectDir);
       stateChanged = true;
     } else {
       // No output — check if process is still alive
