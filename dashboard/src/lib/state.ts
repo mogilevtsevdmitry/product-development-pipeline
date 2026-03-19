@@ -852,33 +852,80 @@ function finalizeAgent(
  * Ставит агента в running, спавнит процесс в фоне, возвращает управление сразу.
  * Процесс по завершении обновляет state JSON.
  */
+/**
+ * Spawn a single agent in background. Does NOT block.
+ */
+function spawnAgent(id: string, agentId: string, state: ProjectState): void {
+  const phase = AGENT_PHASES[agentId] || "other";
+  const outputDir = path.join(PROJECTS_DIR, id, phase, agentId);
+  fs.mkdirSync(outputDir, { recursive: true });
+  const tmpFile = prepareAgentPrompt(agentId, state, outputDir);
+
+  const child = spawn(
+    "/bin/sh",
+    ["-c", `cat "${tmpFile}" | claude --print --dangerously-skip-permissions`],
+    {
+      cwd: outputDir,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: false,
+    }
+  );
+
+  let stdout = "";
+  let stderr = "";
+  child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+  child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+
+  child.on("close", (code) => {
+    try { fs.unlinkSync(tmpFile); } catch { /* */ }
+    if (code === 0 && stdout.trim()) {
+      const outputFile = path.join(outputDir, `${agentId}-output.md`);
+      fs.writeFileSync(outputFile, stdout.trim(), "utf-8");
+      finalizeAgent(id, agentId, true);
+    } else if (code === 0) {
+      finalizeAgent(id, agentId, true);
+    } else {
+      finalizeAgent(id, agentId, false, stderr || `Процесс завершился с кодом ${code}`);
+    }
+  });
+
+  child.on("error", (err) => {
+    try { fs.unlinkSync(tmpFile); } catch { /* */ }
+    finalizeAgent(id, agentId, false, err.message);
+  });
+}
+
+/**
+ * Launch ALL ready agents in parallel. Non-blocking.
+ */
 export function runNextAgent(id: string): {
   ok: boolean;
   agentId?: string;
+  launched?: string[];
   error?: string;
 } {
   const state = getProjectState(id);
   if (!state) return { ok: false, error: "Проект не найден" };
 
-  // Если уже есть running агент — не запускаем второго
-  const alreadyRunning = Object.entries(state.agents).find(
-    ([, a]) => a.status === "running"
-  );
-  if (alreadyRunning) {
-    return { ok: true, agentId: alreadyRunning[0], error: `Агент ${alreadyRunning[0]} уже работает` };
-  }
-
   if (state.status !== "running" && state.status !== "created" && state.status !== "paused") {
     return { ok: false, error: `Нельзя запускать агентов в статусе: ${state.status}` };
   }
 
-  // Если created → переводим в running
   if (state.status === "created" || state.status === "paused") {
     state.status = "running";
   }
 
   const ready = findReadyAgents(state);
   if (ready.length === 0) {
+    // Check if there are running agents (wait for them)
+    const hasRunning = Object.values(state.agents).some(a => a.status === "running");
+    if (hasRunning) {
+      state.updated_at = new Date().toISOString();
+      const fp = path.join(STATE_DIR, `${id}.json`);
+      fs.writeFileSync(fp, JSON.stringify(state, null, 2), "utf-8");
+      return { ok: true, error: "Агенты уже работают, ожидаем завершения" };
+    }
+
     const allDone = state.pipeline_graph.nodes.every((n) => {
       const s = state.agents[n]?.status;
       return s === "completed" || s === "skipped";
@@ -896,67 +943,24 @@ export function runNextAgent(id: string): {
     return { ok: false, error: "Нет готовых агентов (ожидают зависимости или gate)" };
   }
 
-  const agentId = ready[0];
   const now = new Date().toISOString();
 
-  // Mark running + save state BEFORE spawning
-  state.agents[agentId].status = "running";
-  state.agents[agentId].started_at = now;
-  state.agents[agentId].error = null;
+  // Mark ALL ready agents as running + save state BEFORE spawning
+  for (const agentId of ready) {
+    state.agents[agentId].status = "running";
+    state.agents[agentId].started_at = now;
+    state.agents[agentId].error = null;
+  }
   state.updated_at = now;
   const stateFile = path.join(STATE_DIR, `${id}.json`);
   fs.writeFileSync(stateFile, JSON.stringify(state, null, 2), "utf-8");
 
-  // Prepare prompt file + output dir
-  const phase = AGENT_PHASES[agentId] || "other";
-  const outputDir = path.join(PROJECTS_DIR, id, phase, agentId);
-  fs.mkdirSync(outputDir, { recursive: true });
-  const tmpFile = prepareAgentPrompt(agentId, state, outputDir);
+  // Spawn ALL ready agents in parallel
+  for (const agentId of ready) {
+    spawnAgent(id, agentId, state);
+  }
 
-  // Spawn Claude in background — does NOT block the API
-  const child = spawn(
-    "/bin/sh",
-    ["-c", `cat "${tmpFile}" | claude --print --dangerously-skip-permissions`],
-    {
-      cwd: outputDir,
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: false,
-    }
-  );
-
-  let stdout = "";
-  let stderr = "";
-  child.stdout?.on("data", (chunk: Buffer) => {
-    stdout += chunk.toString();
-  });
-  child.stderr?.on("data", (chunk: Buffer) => {
-    stderr += chunk.toString();
-  });
-
-  child.on("close", (code) => {
-    // Cleanup temp file
-    try { fs.unlinkSync(tmpFile); } catch { /* */ }
-
-    if (code === 0 && stdout.trim()) {
-      // Save Claude's output as the artifact file
-      const outputFile = path.join(outputDir, `${agentId}-output.md`);
-      fs.writeFileSync(outputFile, stdout.trim(), "utf-8");
-      finalizeAgent(id, agentId, true);
-    } else if (code === 0) {
-      // Completed but empty output
-      finalizeAgent(id, agentId, true);
-    } else {
-      finalizeAgent(id, agentId, false, stderr || `Процесс завершился с кодом ${code}`);
-    }
-  });
-
-  child.on("error", (err) => {
-    try { fs.unlinkSync(tmpFile); } catch { /* */ }
-    finalizeAgent(id, agentId, false, err.message);
-  });
-
-  // Не ждём — возвращаем управление сразу
-  return { ok: true, agentId };
+  return { ok: true, agentId: ready[0], launched: ready };
 }
 
 /**

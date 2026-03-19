@@ -108,12 +108,7 @@ export default function ProjectPage({
 
     if (data.status !== "running" || data.mode !== "auto") return;
 
-    // Check if there's already a running agent
-    const hasRunning = Object.values(data.agents as Record<string, {status: string}>)
-      .some((a) => a.status === "running");
-    if (hasRunning) return;
-
-    // Check if there are ready agents to launch
+    // Check if there are pending agents whose deps are all completed
     const hasReady = (data.pipeline_graph.nodes as string[]).some((nodeId: string) => {
       const agent = data.agents[nodeId];
       if (!agent || agent.status !== "pending") return false;
