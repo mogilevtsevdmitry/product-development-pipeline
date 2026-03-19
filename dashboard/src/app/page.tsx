@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import ProjectCard from "@/components/ProjectCard";
+import MarkdownEditor from "@/components/MarkdownEditor";
 
 interface ProjectSummary {
   project_id: string;
@@ -129,12 +130,11 @@ export default function HomePage() {
               <label className="block text-sm font-medium text-gray-300 mb-1">
                 Описание идеи
               </label>
-              <textarea
+              <MarkdownEditor
                 value={formDesc}
-                onChange={(e) => setFormDesc(e.target.value)}
-                placeholder="Опишите идею продукта, целевую аудиторию, проблему которую решаете..."
-                rows={3}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                onChange={setFormDesc}
+                placeholder="Опишите идею продукта, целевую аудиторию, проблему...&#10;&#10;Поддерживает **Markdown**: заголовки, списки, код.&#10;Перетащите или вставьте изображение (Ctrl+V)."
+                minRows={6}
               />
             </div>
 
