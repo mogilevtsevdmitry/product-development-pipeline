@@ -110,7 +110,7 @@ export default function ProjectPage({
             </a>
             <span className="text-gray-600">/</span>
           </div>
-          <h1 className="text-2xl font-bold text-white">{state.project_name}</h1>
+          <h1 className="text-2xl font-bold text-white">{state.name}</h1>
           <p className="text-gray-500 text-sm font-mono mt-1">{state.project_id}</p>
         </div>
         <StatusBadge status={state.status as ProjectStatus} />
@@ -205,36 +205,38 @@ export default function ProjectPage({
         {/* Gate History */}
         <div className="rounded-xl border border-gray-800 bg-gray-900 p-5">
           <h3 className="font-semibold text-white mb-3">История решений</h3>
-          {state.gate_decisions.length === 0 ? (
+          {Object.keys(state.gate_decisions).filter(k => state.gate_decisions[k] !== null).length === 0 ? (
             <p className="text-gray-500 text-sm">Решений пока нет</p>
           ) : (
             <div className="space-y-3">
-              {state.gate_decisions.map((gd, i) => (
+              {Object.entries(state.gate_decisions)
+                .filter(([, gd]) => gd !== null)
+                .map(([gateName, gd]) => (
                 <div
-                  key={i}
+                  key={gateName}
                   className="rounded-lg border border-gray-800 bg-gray-950 p-3"
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-sm font-medium text-amber-400">
-                      {gd.gate.replace("_", " ").toUpperCase()}
+                      {gateName.replace(/_/g, " ").toUpperCase()}
                     </span>
                     <span
                       className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                        gd.decision === "go"
+                        gd!.decision === "go"
                           ? "bg-emerald-400/10 text-emerald-400"
-                          : gd.decision === "stop"
+                          : gd!.decision === "stop" || gd!.decision === "no-go"
                           ? "bg-red-400/10 text-red-400"
                           : "bg-amber-400/10 text-amber-400"
                       }`}
                     >
-                      {gd.decision.toUpperCase()}
+                      {gd!.decision.toUpperCase()}
                     </span>
                   </div>
                   <div className="text-xs text-gray-500">
-                    {formatDate(gd.decided_at)} · {gd.decided_by}
+                    {formatDate(gd!.timestamp)} · {gd!.decided_by}
                   </div>
-                  {gd.notes && (
-                    <p className="text-xs text-gray-400 mt-1">{gd.notes}</p>
+                  {gd!.notes && (
+                    <p className="text-xs text-gray-400 mt-1">{gd!.notes}</p>
                   )}
                 </div>
               ))}
