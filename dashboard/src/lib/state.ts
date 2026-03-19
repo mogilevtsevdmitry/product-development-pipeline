@@ -1026,9 +1026,19 @@ function prepareAgentPrompt(
 
   const context = collectInputContext(agentId, state);
 
+  // Agent-specific additions
+  let agentSpecificContext = "";
+  if (agentId === "ux-ui-designer") {
+    // Provide the .pen file path so the agent knows where to create the design
+    const penFileName = `${state.project_id}.pen`;
+    const penFilePath = path.join(PROJECTS_DIR, state.project_id, penFileName);
+    agentSpecificContext = `\n\n# Pencil (.pen) файл\n\nPEN_FILE_PATH: ${penFilePath}\n\nСоздай дизайн в этом файле через mcp__pencil__open_document с filePathOrTemplate равным указанному пути.\nПосле завершения дизайна файл будет доступен пользователю в приложении Pencil.\n`;
+  }
+
   const fullPrompt = [
     systemPrompt,
     rules ? `\n\n# Правила\n\n${rules}` : "",
+    agentSpecificContext,
     context ? `\n\n# Входные данные\n\n${context}` : "",
     `\n\n# Инструкции\n\nВыполни задачу и верни результат в формате Markdown. Весь твой вывод будет сохранён как артефакт. Не пиши ничего лишнего — только структурированный отчёт.`,
   ].join("");
@@ -1054,7 +1064,10 @@ function collectArtifacts(outputDir: string, projectDir: string): string[] {
       if (SKIP_DIRS.has(entry.name)) continue;
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
-      else if (entry.name.endsWith(".md") && !entry.name.startsWith("_")) {
+      else if (
+        (entry.name.endsWith(".md") || entry.name.endsWith(".pen") || entry.name.endsWith(".json"))
+        && !entry.name.startsWith("_")
+      ) {
         artifacts.push(path.relative(projectDir, full));
       }
     }
@@ -1138,6 +1151,17 @@ function finalizeAgent(
     state.agents[agentId].status = "completed";
     state.agents[agentId].artifacts = collectArtifacts(outputDir, projectDir);
     state.agents[agentId].error = null;
+
+    // UX/UI Designer: also collect .pen file from project root
+    if (agentId === "ux-ui-designer") {
+      const penFile = path.join(projectDir, `${id}.pen`);
+      if (fs.existsSync(penFile)) {
+        const relPen = `${id}.pen`;
+        if (!state.agents[agentId].artifacts.includes(relPen)) {
+          state.agents[agentId].artifacts.unshift(relPen);
+        }
+      }
+    }
 
     // After Pipeline Architect completes → expand graph from its output
     if (agentId === "pipeline-architect") {
@@ -1231,6 +1255,11 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
       },
     });
     claudeCmd = `cat "${tmpFile}" | claude --print --output-format json --dangerously-skip-permissions --mcp-config '${mcpConfig}' --allowedTools "mcp__pencil__*"`;
+
+    // Open Pencil app if installed (user can watch design being created live)
+    try {
+      spawn("open", ["-a", "Pencil"], { detached: true, stdio: "ignore" }).unref();
+    } catch { /* Pencil not installed — that's ok */ }
   }
 
   const child = spawn(
