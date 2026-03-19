@@ -457,24 +457,26 @@ export function runNextAgent(id: string): {
     `\n\n# Инструкции по сохранению\n\nСохрани все выходные артефакты в директорию: ${outputDir}\nФормат: Markdown (.md файлы).`,
   ].join("");
 
-  // Write prompt to temp file to avoid shell escaping issues
+  // Write prompt to temp file and pass via stdin to avoid arg length limits
   const tmpFile = path.join(os.tmpdir(), `agent-prompt-${agentId}-${Date.now()}.md`);
   fs.writeFileSync(tmpFile, fullPrompt, "utf-8");
 
   try {
+    // claude --print --dangerously-skip-permissions "prompt"
+    // -p is alias for --print, NOT for passing prompt
+    // prompt is a positional argument, but can be too long for argv
+    // so we pipe it via stdin using shell redirect
     execFileSync(
-      "claude",
+      "/bin/sh",
       [
-        "--print",
-        "--dangerously-skip-permissions",
-        "-p",
-        fullPrompt,
+        "-c",
+        `cat "${tmpFile}" | claude --print --dangerously-skip-permissions`,
       ],
       {
         cwd: outputDir,
         timeout: 600_000,
         stdio: "pipe",
-        maxBuffer: 50 * 1024 * 1024, // 50MB
+        maxBuffer: 50 * 1024 * 1024,
       }
     );
   } catch (err) {
