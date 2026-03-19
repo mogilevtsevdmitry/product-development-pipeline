@@ -254,11 +254,57 @@ function expandPipelineFromArchitect(
   state: ProjectState,
   projectId: string
 ): void {
-  // Try to read PA's output and extract agent list
   const paPhase = AGENT_PHASES["pipeline-architect"] || "meta";
   const paOutputDir = path.join(PROJECTS_DIR, projectId, paPhase, "pipeline-architect");
-  let paOutput = "";
 
+  // 1. Try to read pipeline-graph.json (primary source)
+  const graphJsonPath = path.join(paOutputDir, "pipeline-graph.json");
+  if (fs.existsSync(graphJsonPath)) {
+    try {
+      const graphData = JSON.parse(fs.readFileSync(graphJsonPath, "utf-8"));
+
+      // Extract node IDs from PA's graph
+      let nodeIds: string[] = [];
+      if (graphData.nodes && Array.isArray(graphData.nodes)) {
+        nodeIds = graphData.nodes
+          .map((n: unknown) => typeof n === "string" ? n : (n as { id?: string }).id)
+          .filter((id: unknown): id is string =>
+            typeof id === "string" &&
+            id !== "pipeline-architect" &&
+            id !== "orchestrator" &&
+            !id.startsWith("gate_") // gates are not agents
+          );
+      }
+
+      // Extract edges
+      let edges: [string, string][] = [];
+      if (graphData.edges && Array.isArray(graphData.edges)) {
+        edges = graphData.edges
+          .filter((e: unknown) => {
+            if (!Array.isArray(e)) return false;
+            const [s, t] = e;
+            return typeof s === "string" && typeof t === "string" &&
+              !s.startsWith("gate_") && !t.startsWith("gate_");
+          })
+          .map((e: unknown[]) => [e[0] as string, e[1] as string] as [string, string]);
+      }
+
+      if (nodeIds.length >= 3) {
+        console.log(`[PA] Using pipeline-graph.json: ${nodeIds.length} agents`);
+        if (graphData.excluded_agents) {
+          const excluded = (graphData.excluded_agents as { id: string }[]).map((e) => e.id);
+          console.log(`[PA] Excluded: ${excluded.join(", ")}`);
+        }
+        applyParsedGraph(state, nodeIds, edges);
+        return;
+      }
+    } catch (err) {
+      console.error("[PA] Failed to parse pipeline-graph.json:", err);
+    }
+  }
+
+  // 2. Fallback: read markdown output and look for JSON block
+  let paOutput = "";
   if (fs.existsSync(paOutputDir)) {
     for (const file of fs.readdirSync(paOutputDir)) {
       if (file.endsWith(".md") && !file.startsWith("_")) {
@@ -267,38 +313,29 @@ function expandPipelineFromArchitect(
     }
   }
 
-  // Try to find JSON graph in PA output
-  let parsedGraph: { nodes?: string[]; edges?: [string, string][] } | null = null;
-
-  // Look for JSON block in markdown
   const jsonMatch = paOutput.match(/```json\s*([\s\S]*?)```/);
   if (jsonMatch) {
     try {
       const parsed = JSON.parse(jsonMatch[1]);
-      if (parsed.nodes && Array.isArray(parsed.nodes)) {
-        parsedGraph = parsed;
+      if (parsed.nodes && Array.isArray(parsed.nodes) && parsed.nodes.length > 0) {
+        const nodeIds = parsed.nodes
+          .map((n: unknown) => typeof n === "string" ? n : (n as { id?: string }).id)
+          .filter((id: unknown): id is string =>
+            typeof id === "string" && !id.startsWith("gate_")
+          );
+        console.log(`[PA] Using JSON from markdown: ${nodeIds.length} agents`);
+        applyParsedGraph(state, nodeIds, parsed.edges || []);
+        return;
       }
     } catch { /* not valid JSON */ }
   }
 
-  // Also try: look for agent IDs mentioned in the output
+  // 3. Final fallback: full graph (should rarely happen)
+  console.log("[PA] No valid graph found, using full agent set");
   const ALL_AGENT_IDS = Object.keys(AGENT_DIRS);
-  const mentionedAgents = ALL_AGENT_IDS.filter((id) =>
-    paOutput.includes(id) && id !== "pipeline-architect" && id !== "orchestrator"
-  );
-
-  if (parsedGraph && parsedGraph.nodes && parsedGraph.nodes.length > 0) {
-    // Use PA's graph directly
-    applyParsedGraph(state, parsedGraph.nodes, parsedGraph.edges || []);
-  } else if (mentionedAgents.length >= 3) {
-    // Build graph from mentioned agents
-    buildGraphFromAgentList(state, mentionedAgents);
-  } else {
-    // Fallback: full graph
-    buildGraphFromAgentList(state, ALL_AGENT_IDS.filter(
-      (id) => id !== "orchestrator"
-    ));
-  }
+  buildGraphFromAgentList(state, ALL_AGENT_IDS.filter(
+    (id) => id !== "orchestrator"
+  ));
 }
 
 /**
