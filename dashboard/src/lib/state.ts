@@ -726,11 +726,17 @@ function prepareAgentPrompt(
 /**
  * Собрать артефакты из директории агента.
  */
+const SKIP_DIRS = new Set([
+  "node_modules", ".next", ".git", "__pycache__", ".venv",
+  "venv", "dist", "build", ".cache", ".turbo",
+]);
+
 function collectArtifacts(outputDir: string, projectDir: string): string[] {
   const artifacts: string[] = [];
   function walk(dir: string) {
     if (!fs.existsSync(dir)) return;
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (SKIP_DIRS.has(entry.name)) continue;
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
       else if (entry.name.endsWith(".md") && !entry.name.startsWith("_")) {
