@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
+import os from "os";
+import { execFileSync } from "child_process";
 import type { ProjectState, GateType, GateDecisionValue } from "./types";
 
 const STATE_DIR = path.resolve(
@@ -456,17 +457,29 @@ export function runNextAgent(id: string): {
     `\n\n# Инструкции по сохранению\n\nСохрани все выходные артефакты в директорию: ${outputDir}\nФормат: Markdown (.md файлы).`,
   ].join("");
 
+  // Write prompt to temp file to avoid shell escaping issues
+  const tmpFile = path.join(os.tmpdir(), `agent-prompt-${agentId}-${Date.now()}.md`);
+  fs.writeFileSync(tmpFile, fullPrompt, "utf-8");
+
   try {
-    execSync(
-      `claude --print --dangerously-skip-permissions -p "${fullPrompt.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`,
+    execFileSync(
+      "claude",
+      [
+        "--print",
+        "--dangerously-skip-permissions",
+        "-p",
+        fullPrompt,
+      ],
       {
         cwd: outputDir,
         timeout: 600_000,
         stdio: "pipe",
-        encoding: "utf-8",
+        maxBuffer: 50 * 1024 * 1024, // 50MB
       }
     );
   } catch (err) {
+    // Clean up temp file
+    try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
     // Agent failed
     const reloadedState = getProjectState(id)!;
     reloadedState.agents[agentId].status = "failed";
@@ -476,6 +489,9 @@ export function runNextAgent(id: string): {
     fs.writeFileSync(stateFile, JSON.stringify(reloadedState, null, 2), "utf-8");
     return { ok: false, agentId, error: `Агент ${agentId} завершился с ошибкой` };
   }
+
+  // Clean up temp file
+  try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
 
   // Collect output artifacts
   const artifacts: string[] = [];
