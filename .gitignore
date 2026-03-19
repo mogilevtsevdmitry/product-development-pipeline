@@ -1,0 +1,11 @@
+projects/
+node_modules/
+.next/
+__pycache__/
+*.pyc
+.env
+.env.local
+orchestrator/state/*.json
+dashboard/.next/
+.DS_Store
+*.log

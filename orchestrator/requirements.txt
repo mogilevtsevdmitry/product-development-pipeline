@@ -1,0 +1,12 @@
+# Product Development Pipeline — Orchestrator
+#
+# Внешние зависимости не требуются.
+# Все используемые модули входят в стандартную библиотеку Python:
+# - pathlib
+# - json
+# - subprocess
+# - datetime
+# - time
+# - re
+# - unicodedata
+# - typing
