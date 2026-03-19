@@ -177,11 +177,39 @@ export function resolveGate(
   };
 
   if (decision === "stop" || decision === "no-go") {
-    state.status = "failed";
+    state.status = "stopped";
     state.current_gate = null;
-  } else {
+    // Mark remaining agents as skipped
+    for (const agent of Object.values(state.agents)) {
+      if (agent.status === "pending") agent.status = "skipped";
+    }
+  } else if (decision === "pivot" || decision === "revise" || decision === "rollback") {
+    // Rework — reset the "after" agents to re-run them
+    const gateDef = GATES.find((g) => g.name === gate);
+    if (gateDef) {
+      for (const agentId of gateDef.after) {
+        if (state.agents[agentId]) {
+          state.agents[agentId].status = "pending";
+          state.agents[agentId].started_at = null;
+          state.agents[agentId].completed_at = null;
+          state.agents[agentId].artifacts = [];
+          state.agents[agentId].error = null;
+        }
+      }
+    }
+    // Remove gate decision so it can be re-triggered
+    delete state.gate_decisions[gate];
     state.status = "running";
     state.current_gate = null;
+  } else {
+    // "go" — continue pipeline
+    state.status = "running";
+    state.current_gate = null;
+
+    // After Gate 1 → expand pipeline graph with full agent set
+    if (gate === "gate_1_build") {
+      expandPipelineAfterGate1(state);
+    }
   }
 
   state.updated_at = new Date().toISOString();
@@ -189,6 +217,88 @@ export function resolveGate(
   const filePath = path.join(STATE_DIR, `${id}.json`);
   fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
   return true;
+}
+
+/**
+ * After Gate 1: expand the pipeline graph.
+ * Adds Pipeline Architect, BA, and dynamically determined agents.
+ * For now adds the default full development pipeline.
+ */
+function expandPipelineAfterGate1(state: ProjectState): void {
+  // Default full pipeline after gate 1
+  const fullNodes = [
+    "problem-researcher", "market-researcher", "product-owner",
+    "pipeline-architect",
+    "business-analyst", "legal-compliance",
+    "ux-ui-designer",
+    "system-architect",
+    "tech-lead",
+    "backend-developer", "frontend-developer",
+    "devops-engineer",
+    "qa-engineer", "security-engineer",
+    "release-manager",
+    "product-marketer", "smm-manager", "content-creator",
+    "customer-support", "data-analyst",
+  ];
+
+  const fullEdges: [string, string][] = [
+    // Static chain (already done)
+    ["problem-researcher", "market-researcher"],
+    ["market-researcher", "product-owner"],
+    // After gate 1
+    ["product-owner", "pipeline-architect"],
+    ["pipeline-architect", "business-analyst"],
+    // BA feeds into multiple
+    ["business-analyst", "legal-compliance"],
+    ["business-analyst", "ux-ui-designer"],
+    ["business-analyst", "system-architect"],
+    // Design + Architecture → Tech Lead (gate 2 before this)
+    ["system-architect", "tech-lead"],
+    ["ux-ui-designer", "tech-lead"],
+    // Development
+    ["tech-lead", "backend-developer"],
+    ["tech-lead", "frontend-developer"],
+    // QA/Security/DevOps need code
+    ["backend-developer", "qa-engineer"],
+    ["frontend-developer", "qa-engineer"],
+    ["backend-developer", "security-engineer"],
+    ["frontend-developer", "security-engineer"],
+    ["backend-developer", "devops-engineer"],
+    ["frontend-developer", "devops-engineer"],
+    // Gate 3 before release
+    ["qa-engineer", "release-manager"],
+    ["security-engineer", "release-manager"],
+    ["devops-engineer", "release-manager"],
+    // Marketing (parallel branch from PO)
+    ["product-owner", "product-marketer"],
+    ["product-marketer", "smm-manager"],
+    ["product-marketer", "content-creator"],
+    // Feedback (after release)
+    ["release-manager", "customer-support"],
+    ["customer-support", "data-analyst"],
+  ];
+
+  state.pipeline_graph.nodes = fullNodes;
+  state.pipeline_graph.edges = fullEdges;
+  state.pipeline_graph.parallel_groups = [
+    ["business-analyst", "legal-compliance"],
+    ["backend-developer", "frontend-developer"],
+    ["qa-engineer", "security-engineer", "devops-engineer"],
+    ["smm-manager", "content-creator"],
+  ];
+
+  // Add state for new agents
+  for (const nodeId of fullNodes) {
+    if (!state.agents[nodeId]) {
+      state.agents[nodeId] = {
+        status: "pending",
+        started_at: null,
+        completed_at: null,
+        artifacts: [],
+        error: null,
+      };
+    }
+  }
 }
 
 // ============================================================================
@@ -329,13 +439,32 @@ const AGENT_PHASES: Record<string, string> = {
 };
 
 /**
- * Найти агентов, готовых к запуску (все зависимости completed).
+ * Найти агентов, готовых к запуску.
+ * Условия: все зависимости completed + не заблокирован gate-точкой.
  */
 function findReadyAgents(state: ProjectState): string[] {
+  // Find agents blocked by unresolved gates
+  const blockedByGate = new Set<string>();
+  for (const gate of GATES) {
+    if (state.gate_decisions[gate.name]) continue; // gate resolved
+    // Check if gate should be active (all "after" agents completed)
+    const afterInGraph = gate.after.filter((a) =>
+      state.pipeline_graph.nodes.includes(a)
+    );
+    const allAfterDone = afterInGraph.length > 0 && afterInGraph.every(
+      (a) => state.agents[a]?.status === "completed"
+    );
+    if (allAfterDone) {
+      // Gate is active but not resolved — block "before" agents
+      for (const b of gate.before) blockedByGate.add(b);
+    }
+  }
+
   const ready: string[] = [];
   for (const nodeId of state.pipeline_graph.nodes) {
     const agent = state.agents[nodeId];
     if (!agent || agent.status !== "pending") continue;
+    if (blockedByGate.has(nodeId)) continue;
 
     const deps = state.pipeline_graph.edges
       .filter(([, tgt]) => tgt === nodeId)
@@ -431,6 +560,57 @@ function collectArtifacts(outputDir: string, projectDir: string): string[] {
 }
 
 /**
+ * Gate definitions: after which agents → pause at which gate.
+ */
+const GATES: {
+  name: string;
+  after: string[];    // all these must be completed
+  before: string[];   // these are blocked until gate is resolved
+}[] = [
+  {
+    name: "gate_1_build",
+    after: ["product-owner"],
+    before: ["pipeline-architect"],
+  },
+  {
+    name: "gate_2_architecture",
+    after: ["system-architect", "ux-ui-designer"],
+    before: ["tech-lead"],
+  },
+  {
+    name: "gate_3_go_nogo",
+    after: ["qa-engineer", "security-engineer", "devops-engineer"],
+    before: ["release-manager"],
+  },
+];
+
+/**
+ * Check if any gate should be triggered given the current state.
+ * Returns gate name if pipeline should pause, null otherwise.
+ */
+function checkGates(state: ProjectState): string | null {
+  for (const gate of GATES) {
+    // Skip if gate already decided
+    if (state.gate_decisions[gate.name]) continue;
+
+    // Check if all "after" agents are in the graph and completed
+    const afterInGraph = gate.after.filter((a) =>
+      state.pipeline_graph.nodes.includes(a)
+    );
+    if (afterInGraph.length === 0) continue;
+
+    const allAfterDone = afterInGraph.every(
+      (a) => state.agents[a]?.status === "completed"
+    );
+    if (!allAfterDone) continue;
+
+    // Gate should trigger — after agents done, gate not yet decided
+    return gate.name;
+  }
+  return null;
+}
+
+/**
  * Обновить state после завершения агента.
  */
 function finalizeAgent(
@@ -457,13 +637,23 @@ function finalizeAgent(
   state.agents[agentId].completed_at = new Date().toISOString();
   state.updated_at = new Date().toISOString();
 
-  // Проверяем завершённость пайплайна
-  const allDone = state.pipeline_graph.nodes.every((n) => {
-    const s = state.agents[n]?.status;
-    return s === "completed" || s === "skipped";
-  });
-  if (allDone) state.status = "completed";
-  if (!success) state.status = "failed";
+  if (!success) {
+    state.status = "failed";
+  } else {
+    // Check gates BEFORE checking pipeline completion
+    const gate = checkGates(state);
+    if (gate) {
+      state.status = "paused_at_gate";
+      state.current_gate = gate;
+    } else {
+      // Check pipeline completion
+      const allDone = state.pipeline_graph.nodes.every((n) => {
+        const s = state.agents[n]?.status;
+        return s === "completed" || s === "skipped";
+      });
+      if (allDone) state.status = "completed";
+    }
+  }
 
   const fp = path.join(STATE_DIR, `${id}.json`);
   fs.writeFileSync(fp, JSON.stringify(state, null, 2), "utf-8");
