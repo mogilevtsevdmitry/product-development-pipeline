@@ -1216,9 +1216,26 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
 
   const startTime = Date.now();
 
+  // Build Claude CLI command with agent-specific MCP tools
+  let claudeCmd = `cat "${tmpFile}" | claude --print --output-format json --dangerously-skip-permissions`;
+
+  // UX/UI Designer gets access to Pencil MCP for .pen file creation
+  if (agentId === "ux-ui-designer") {
+    const pencilBin = "/Applications/Pencil.app/Contents/Resources/app.asar.unpacked/out/mcp-server-darwin-arm64";
+    const mcpConfig = JSON.stringify({
+      mcpServers: {
+        pencil: {
+          command: pencilBin,
+          args: ["--app", "desktop"],
+        },
+      },
+    });
+    claudeCmd = `cat "${tmpFile}" | claude --print --output-format json --dangerously-skip-permissions --mcp-config '${mcpConfig}' --allowedTools "mcp__pencil__*"`;
+  }
+
   const child = spawn(
     "/bin/sh",
-    ["-c", `cat "${tmpFile}" | claude --print --output-format json --dangerously-skip-permissions`],
+    ["-c", claudeCmd],
     {
       cwd: outputDir,
       stdio: ["ignore", "pipe", "pipe"],
