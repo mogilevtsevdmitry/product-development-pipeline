@@ -4,7 +4,10 @@ import { useEffect, useState, useRef, use } from "react";
 import StatusBadge from "@/components/StatusBadge";
 import ArtifactViewer from "@/components/ArtifactViewer";
 import RevisionChat from "@/components/RevisionChat";
+import ReasoningView from "@/components/ReasoningView";
 import type { ProjectState, AgentStatus } from "@/lib/types";
+
+type Tab = "overview" | "reasoning";
 
 // Agent display names
 const AGENT_LABELS: Record<string, string> = {
@@ -91,6 +94,7 @@ export default function AgentDetailPage({
   const [error, setError] = useState<string | null>(null);
   const [restarting, setRestarting] = useState(false);
   const [openArtifact, setOpenArtifact] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("overview");
   const lastJsonRef = useRef<string>("");
 
   useEffect(() => {
@@ -182,7 +186,7 @@ export default function AgentDetailPage({
       </div>
 
       {/* Header */}
-      <div className="flex items-start justify-between mb-8">
+      <div className="flex items-start justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-white">{label}</h1>
           <p className="text-gray-500 text-sm font-mono mt-1">{agentKey}</p>
@@ -190,8 +194,45 @@ export default function AgentDetailPage({
         <StatusBadge status={agent.status as AgentStatus} />
       </div>
 
-      {/* Details */}
-      <div className="space-y-6">
+      {/* Tabs */}
+      <div className="flex gap-1 mb-6 border-b border-gray-800">
+        <button
+          onClick={() => setTab("overview")}
+          className={`px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors ${
+            tab === "overview"
+              ? "bg-gray-800 text-white border-b-2 border-blue-500"
+              : "text-gray-500 hover:text-gray-300 hover:bg-gray-800/50"
+          }`}
+        >
+          📋 Обзор
+        </button>
+        <button
+          onClick={() => setTab("reasoning")}
+          className={`px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors ${
+            tab === "reasoning"
+              ? "bg-gray-800 text-white border-b-2 border-purple-500"
+              : "text-gray-500 hover:text-gray-300 hover:bg-gray-800/50"
+          }`}
+        >
+          🧠 Рассуждение
+          {(agent.status === "completed" || agent.status === "failed") && (
+            <span className="ml-1.5 w-1.5 h-1.5 rounded-full bg-purple-400 inline-block" />
+          )}
+        </button>
+      </div>
+
+      {/* Tab: Reasoning */}
+      {tab === "reasoning" && (
+        <ReasoningView
+          projectId={state.project_id}
+          agentId={agentKey}
+          agentStatus={agent.status}
+          phase={AGENT_PHASES[agentKey]?.toLowerCase() || "other"}
+        />
+      )}
+
+      {/* Tab: Overview */}
+      {tab === "overview" && <div className="space-y-6">
         {/* Main Info */}
         <div className="rounded-xl border border-gray-800 bg-gray-900 p-6">
           <h3 className="font-semibold text-white mb-4">Основная информация</h3>
@@ -346,7 +387,7 @@ export default function AgentDetailPage({
             agentStatus={agent.status}
           />
         ) : null}
-      </div>
+      </div>}
     </div>
   );
 }

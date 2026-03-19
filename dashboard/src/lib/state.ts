@@ -1012,6 +1012,13 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
   fs.mkdirSync(outputDir, { recursive: true });
   const tmpFile = prepareAgentPrompt(agentId, state, outputDir);
 
+  // Save the prompt as _prompt.md so we can view it later (reasoning tab)
+  const promptContent = fs.readFileSync(tmpFile, "utf-8");
+  const promptLogFile = path.join(outputDir, "_prompt.md");
+  fs.writeFileSync(promptLogFile, promptContent, "utf-8");
+
+  const startTime = Date.now();
+
   const child = spawn(
     "/bin/sh",
     ["-c", `cat "${tmpFile}" | claude --print --dangerously-skip-permissions`],
@@ -1029,6 +1036,62 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
 
   child.on("close", (code) => {
     try { fs.unlinkSync(tmpFile); } catch { /* */ }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+    // Save full execution log: prompt + output + stderr
+    const logParts: string[] = [
+      `# Лог выполнения: ${agentId}`,
+      ``,
+      `**Время запуска:** ${new Date(startTime).toISOString()}`,
+      `**Длительность:** ${elapsed}с`,
+      `**Код выхода:** ${code}`,
+      ``,
+      `---`,
+      ``,
+      `## Входные данные (промпт)`,
+      ``,
+      `<details>`,
+      `<summary>Показать полный промпт (${promptContent.length} символов)</summary>`,
+      ``,
+      "```markdown",
+      promptContent.length > 50000
+        ? promptContent.slice(0, 50000) + "\n\n... [обрезано] ..."
+        : promptContent,
+      "```",
+      `</details>`,
+      ``,
+    ];
+
+    if (stdout.trim()) {
+      logParts.push(
+        `## Ответ модели`,
+        ``,
+        stdout.trim(),
+        ``,
+      );
+    }
+
+    if (stderr.trim()) {
+      logParts.push(
+        `## Stderr / Ошибки`,
+        ``,
+        "```",
+        stderr.trim().slice(0, 5000),
+        "```",
+        ``,
+      );
+    }
+
+    logParts.push(
+      `---`,
+      ``,
+      `*Лог сохранён автоматически*`,
+    );
+
+    const logFile = path.join(outputDir, "_reasoning.md");
+    fs.writeFileSync(logFile, logParts.join("\n"), "utf-8");
+
     if (code === 0 && stdout.trim()) {
       const outputFile = path.join(outputDir, `${agentId}-output.md`);
       fs.writeFileSync(outputFile, stdout.trim(), "utf-8");
@@ -1040,13 +1103,25 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
       if (stderr.trim()) errorParts.push(stderr.trim());
       if (stdout.trim()) errorParts.push(stdout.trim());
       const errorMsg = errorParts.join("\n\n") || `Процесс завершился с кодом ${code}`;
-      // Truncate to avoid huge error messages
       finalizeAgent(id, agentId, false, errorMsg.slice(0, 3000));
     }
   });
 
   child.on("error", (err) => {
     try { fs.unlinkSync(tmpFile); } catch { /* */ }
+    // Save error log
+    const logFile = path.join(outputDir, "_reasoning.md");
+    fs.writeFileSync(logFile, [
+      `# Лог выполнения: ${agentId}`,
+      ``,
+      `**Ошибка запуска:** ${err.message}`,
+      ``,
+      `## Входные данные (промпт)`,
+      ``,
+      "```markdown",
+      promptContent.slice(0, 10000),
+      "```",
+    ].join("\n"), "utf-8");
     finalizeAgent(id, agentId, false, err.message);
   });
 }
