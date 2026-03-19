@@ -894,7 +894,12 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
     } else if (code === 0) {
       finalizeAgent(id, agentId, true);
     } else {
-      finalizeAgent(id, agentId, false, stderr || `Процесс завершился с кодом ${code}`);
+      const errorParts: string[] = [];
+      if (stderr.trim()) errorParts.push(stderr.trim());
+      if (stdout.trim()) errorParts.push(stdout.trim());
+      const errorMsg = errorParts.join("\n\n") || `Процесс завершился с кодом ${code}`;
+      // Truncate to avoid huge error messages
+      finalizeAgent(id, agentId, false, errorMsg.slice(0, 3000));
     }
   });
 

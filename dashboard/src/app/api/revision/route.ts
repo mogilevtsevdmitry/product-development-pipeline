@@ -182,7 +182,7 @@ export async function POST(req: NextRequest) {
       role: "agent",
       message: code === 0
         ? "Правки внесены. Артефакты обновлены."
-        : `Ошибка: ${stderr || `код ${code}`}`,
+        : `Ошибка:\n${[stderr, stdout].filter(s => s.trim()).join("\n\n") || `код ${code}`}`.slice(0, 3000),
       timestamp: new Date().toISOString(),
     });
     fs.writeFileSync(revisionFile, JSON.stringify(currentHistory, null, 2), "utf-8");
@@ -192,9 +192,10 @@ export async function POST(req: NextRequest) {
       try {
         const state = JSON.parse(fs.readFileSync(stateFile, "utf-8"));
         if (state.agents[agentId]) {
+          const errMsg = [stderr, stdout].filter(s => s.trim()).join("\n\n") || `код ${code}`;
           state.agents[agentId].status = code === 0 ? "completed" : "failed";
           state.agents[agentId].completed_at = new Date().toISOString();
-          state.agents[agentId].error = code === 0 ? null : (stderr || `код ${code}`);
+          state.agents[agentId].error = code === 0 ? null : errMsg.slice(0, 3000);
 
           // Re-collect artifacts
           const artifacts: string[] = [];
