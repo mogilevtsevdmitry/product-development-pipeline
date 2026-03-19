@@ -142,7 +142,7 @@ export async function POST(req: NextRequest) {
     artifactContents.join("\n"),
     "\n\n# Правки от человека\n\n",
     message,
-    `\n\n# Инструкции\n\nОбнови свой отчёт с учётом правок. Сохрани обновлённые файлы в директорию: ${agentOutputDir}\nФормат: Markdown (.md файлы). Перезапиши существующие файлы с улучшениями.`,
+    `\n\n# Инструкции\n\nОбнови свой отчёт с учётом правок. Верни полный обновлённый отчёт в формате Markdown. Весь твой вывод будет сохранён. Не пиши ничего лишнего — только обновлённый структурированный отчёт.`,
   ].join("");
 
   // Write to temp file
@@ -166,6 +166,12 @@ export async function POST(req: NextRequest) {
 
   child.on("close", (code) => {
     try { fs.unlinkSync(tmpFile); } catch { /* */ }
+
+    // Save Claude's output as updated artifact
+    if (code === 0 && stdout.trim()) {
+      const outputFile = path.join(agentOutputDir, `${agentId}-output.md`);
+      fs.writeFileSync(outputFile, stdout.trim(), "utf-8");
+    }
 
     // Save agent response to revision history
     const currentHistory: RevisionEntry[] = fs.existsSync(revisionFile)

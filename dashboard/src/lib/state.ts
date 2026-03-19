@@ -554,7 +554,7 @@ function prepareAgentPrompt(
     systemPrompt,
     rules ? `\n\n# Правила\n\n${rules}` : "",
     context ? `\n\n# Входные данные\n\n${context}` : "",
-    `\n\n# Инструкции по сохранению\n\nСохрани все выходные артефакты в директорию: ${outputDir}\nФормат: Markdown (.md файлы).`,
+    `\n\n# Инструкции\n\nВыполни задачу и верни результат в формате Markdown. Весь твой вывод будет сохранён как артефакт. Не пиши ничего лишнего — только структурированный отчёт.`,
   ].join("");
 
   const tmpFile = path.join(os.tmpdir(), `agent-prompt-${agentId}-${Date.now()}.md`);
@@ -572,7 +572,7 @@ function collectArtifacts(outputDir: string, projectDir: string): string[] {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
-      else if (entry.name.endsWith(".md")) {
+      else if (entry.name.endsWith(".md") && !entry.name.startsWith("_")) {
         artifacts.push(path.relative(projectDir, full));
       }
     }
@@ -758,7 +758,11 @@ export function runNextAgent(id: string): {
     }
   );
 
+  let stdout = "";
   let stderr = "";
+  child.stdout?.on("data", (chunk: Buffer) => {
+    stdout += chunk.toString();
+  });
   child.stderr?.on("data", (chunk: Buffer) => {
     stderr += chunk.toString();
   });
@@ -767,7 +771,13 @@ export function runNextAgent(id: string): {
     // Cleanup temp file
     try { fs.unlinkSync(tmpFile); } catch { /* */ }
 
-    if (code === 0) {
+    if (code === 0 && stdout.trim()) {
+      // Save Claude's output as the artifact file
+      const outputFile = path.join(outputDir, `${agentId}-output.md`);
+      fs.writeFileSync(outputFile, stdout.trim(), "utf-8");
+      finalizeAgent(id, agentId, true);
+    } else if (code === 0) {
+      // Completed but empty output
       finalizeAgent(id, agentId, true);
     } else {
       finalizeAgent(id, agentId, false, stderr || `Процесс завершился с кодом ${code}`);
