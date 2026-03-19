@@ -276,18 +276,66 @@ function expandPipelineFromArchitect(
           );
       }
 
-      // Extract edges
+      // Extract edges — support both [from, to] arrays and {from, to} objects
       let edges: [string, string][] = [];
+      const nodeIdSet = new Set(nodeIds);
+
       if (graphData.edges && Array.isArray(graphData.edges)) {
-        edges = graphData.edges
-          .filter((e: unknown) => {
-            if (!Array.isArray(e)) return false;
-            const [s, t] = e;
-            return typeof s === "string" && typeof t === "string" &&
-              !s.startsWith("gate_") && !t.startsWith("gate_");
-          })
-          .map((e: unknown[]) => [e[0] as string, e[1] as string] as [string, string]);
+        for (const e of graphData.edges) {
+          let from: string | undefined;
+          let to: string | undefined;
+
+          if (Array.isArray(e) && e.length >= 2) {
+            from = e[0];
+            to = e[1];
+          } else if (e && typeof e === "object") {
+            from = (e as { from?: string }).from;
+            to = (e as { to?: string }).to;
+          }
+
+          if (from && to && typeof from === "string" && typeof to === "string") {
+            // Skip gate nodes — connect through them
+            if (from.startsWith("gate_") || to.startsWith("gate_")) continue;
+            if (nodeIdSet.has(from) && nodeIdSet.has(to)) {
+              edges.push([from, to]);
+            }
+          }
+        }
       }
+
+      // Also extract edges from depends_on in nodes
+      if (graphData.nodes && Array.isArray(graphData.nodes)) {
+        for (const node of graphData.nodes) {
+          if (!node || typeof node !== "object") continue;
+          const nodeObj = node as { id?: string; depends_on?: string[] };
+          const id = nodeObj.id;
+          const deps = nodeObj.depends_on;
+          if (!id || !deps || !Array.isArray(deps)) continue;
+          if (id.startsWith("gate_")) continue;
+
+          for (const dep of deps) {
+            if (typeof dep !== "string") continue;
+            if (dep.startsWith("gate_")) {
+              // Find what feeds into this gate and connect directly
+              const gateNode = (graphData.nodes as { id?: string; depends_on?: string[] }[])
+                .find((n) => n?.id === dep);
+              if (gateNode?.depends_on) {
+                for (const gateDep of gateNode.depends_on) {
+                  if (typeof gateDep === "string" && nodeIdSet.has(gateDep) && nodeIdSet.has(id)) {
+                    edges.push([gateDep, id]);
+                  }
+                }
+              }
+            } else if (nodeIdSet.has(dep) && nodeIdSet.has(id)) {
+              edges.push([dep, id]);
+            }
+          }
+        }
+      }
+
+      // Deduplicate edges
+      const edgeSet = new Set(edges.map(([s, t]) => `${s}:${t}`));
+      edges = Array.from(edgeSet).map((e) => e.split(":") as [string, string]);
 
       if (nodeIds.length >= 3) {
         console.log(`[PA] Using pipeline-graph.json: ${nodeIds.length} agents`);
