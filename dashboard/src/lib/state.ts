@@ -220,75 +220,212 @@ export function resolveGate(
 }
 
 /**
- * After Gate 1: expand the pipeline graph.
- * Adds Pipeline Architect, BA, and dynamically determined agents.
- * For now adds the default full development pipeline.
+ * After Gate 1: add only pipeline-architect.
+ * The full graph will be built after PA completes based on its output.
  */
 function expandPipelineAfterGate1(state: ProjectState): void {
-  // Default full pipeline after gate 1
-  const fullNodes = [
-    "problem-researcher", "market-researcher", "product-owner",
-    "pipeline-architect",
-    "business-analyst", "legal-compliance",
-    "ux-ui-designer",
-    "system-architect",
-    "tech-lead",
-    "backend-developer", "frontend-developer",
-    "devops-engineer",
-    "qa-engineer", "security-engineer",
-    "release-manager",
-    "product-marketer", "smm-manager", "content-creator",
-    "customer-support", "data-analyst",
-  ];
+  // Add only pipeline-architect node + edge from PO
+  if (!state.pipeline_graph.nodes.includes("pipeline-architect")) {
+    state.pipeline_graph.nodes.push("pipeline-architect");
+  }
+  const hasEdge = state.pipeline_graph.edges.some(
+    ([s, t]) => s === "product-owner" && t === "pipeline-architect"
+  );
+  if (!hasEdge) {
+    state.pipeline_graph.edges.push(["product-owner", "pipeline-architect"]);
+  }
+  if (!state.agents["pipeline-architect"]) {
+    state.agents["pipeline-architect"] = {
+      status: "pending",
+      started_at: null,
+      completed_at: null,
+      artifacts: [],
+      error: null,
+    };
+  }
+}
 
-  const fullEdges: [string, string][] = [
-    // Static chain (already done)
+/**
+ * After Pipeline Architect completes: read its artifact,
+ * parse the recommended agents, and build the actual graph.
+ * Falls back to full graph if parsing fails.
+ */
+function expandPipelineFromArchitect(
+  state: ProjectState,
+  projectId: string
+): void {
+  // Try to read PA's output and extract agent list
+  const paPhase = AGENT_PHASES["pipeline-architect"] || "meta";
+  const paOutputDir = path.join(PROJECTS_DIR, projectId, paPhase, "pipeline-architect");
+  let paOutput = "";
+
+  if (fs.existsSync(paOutputDir)) {
+    for (const file of fs.readdirSync(paOutputDir)) {
+      if (file.endsWith(".md") && !file.startsWith("_")) {
+        paOutput += fs.readFileSync(path.join(paOutputDir, file), "utf-8");
+      }
+    }
+  }
+
+  // Try to find JSON graph in PA output
+  let parsedGraph: { nodes?: string[]; edges?: [string, string][] } | null = null;
+
+  // Look for JSON block in markdown
+  const jsonMatch = paOutput.match(/```json\s*([\s\S]*?)```/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[1]);
+      if (parsed.nodes && Array.isArray(parsed.nodes)) {
+        parsedGraph = parsed;
+      }
+    } catch { /* not valid JSON */ }
+  }
+
+  // Also try: look for agent IDs mentioned in the output
+  const ALL_AGENT_IDS = Object.keys(AGENT_DIRS);
+  const mentionedAgents = ALL_AGENT_IDS.filter((id) =>
+    paOutput.includes(id) && id !== "pipeline-architect" && id !== "orchestrator"
+  );
+
+  if (parsedGraph && parsedGraph.nodes && parsedGraph.nodes.length > 0) {
+    // Use PA's graph directly
+    applyParsedGraph(state, parsedGraph.nodes, parsedGraph.edges || []);
+  } else if (mentionedAgents.length >= 3) {
+    // Build graph from mentioned agents
+    buildGraphFromAgentList(state, mentionedAgents);
+  } else {
+    // Fallback: full graph
+    buildGraphFromAgentList(state, ALL_AGENT_IDS.filter(
+      (id) => id !== "orchestrator"
+    ));
+  }
+}
+
+/**
+ * Apply a parsed graph from PA output.
+ */
+function applyParsedGraph(
+  state: ProjectState,
+  nodes: string[],
+  edges: [string, string][]
+): void {
+  // Always keep static chain + pipeline-architect
+  const keepNodes = new Set([
+    "problem-researcher", "market-researcher", "product-owner",
+    "pipeline-architect", ...nodes,
+  ]);
+
+  state.pipeline_graph.nodes = Array.from(keepNodes);
+  state.pipeline_graph.edges = [
     ["problem-researcher", "market-researcher"],
     ["market-researcher", "product-owner"],
-    // After gate 1
     ["product-owner", "pipeline-architect"],
-    ["pipeline-architect", "business-analyst"],
-    // BA feeds into multiple
-    ["business-analyst", "legal-compliance"],
-    ["business-analyst", "ux-ui-designer"],
-    ["business-analyst", "system-architect"],
-    // Design + Architecture → Tech Lead (gate 2 before this)
-    ["system-architect", "tech-lead"],
-    ["ux-ui-designer", "tech-lead"],
-    // Development
-    ["tech-lead", "backend-developer"],
-    ["tech-lead", "frontend-developer"],
-    // QA/Security/DevOps need code
-    ["backend-developer", "qa-engineer"],
-    ["frontend-developer", "qa-engineer"],
-    ["backend-developer", "security-engineer"],
-    ["frontend-developer", "security-engineer"],
-    ["backend-developer", "devops-engineer"],
-    ["frontend-developer", "devops-engineer"],
-    // Gate 3 before release
-    ["qa-engineer", "release-manager"],
-    ["security-engineer", "release-manager"],
-    ["devops-engineer", "release-manager"],
-    // Marketing (parallel branch from PO)
-    ["product-owner", "product-marketer"],
-    ["product-marketer", "smm-manager"],
-    ["product-marketer", "content-creator"],
-    // Feedback (after release)
-    ["release-manager", "customer-support"],
-    ["customer-support", "data-analyst"],
-  ];
-
-  state.pipeline_graph.nodes = fullNodes;
-  state.pipeline_graph.edges = fullEdges;
-  state.pipeline_graph.parallel_groups = [
-    ["business-analyst", "legal-compliance"],
-    ["backend-developer", "frontend-developer"],
-    ["qa-engineer", "security-engineer", "devops-engineer"],
-    ["smm-manager", "content-creator"],
+    ...edges,
   ];
 
   // Add state for new agents
-  for (const nodeId of fullNodes) {
+  for (const nodeId of state.pipeline_graph.nodes) {
+    if (!state.agents[nodeId]) {
+      state.agents[nodeId] = {
+        status: "pending",
+        started_at: null,
+        completed_at: null,
+        artifacts: [],
+        error: null,
+      };
+    }
+  }
+}
+
+/**
+ * Build graph from a list of agent IDs using default dependency rules.
+ */
+function buildGraphFromAgentList(
+  state: ProjectState,
+  agents: string[]
+): void {
+  const has = (id: string) => agents.includes(id);
+  const nodes = new Set([
+    "problem-researcher", "market-researcher", "product-owner",
+    "pipeline-architect", ...agents,
+  ]);
+
+  const edges: [string, string][] = [
+    ["problem-researcher", "market-researcher"],
+    ["market-researcher", "product-owner"],
+    ["product-owner", "pipeline-architect"],
+  ];
+
+  // Pipeline Architect → BA (always if BA present)
+  if (has("business-analyst")) {
+    edges.push(["pipeline-architect", "business-analyst"]);
+  }
+
+  // BA → Legal, Designer, Architect
+  if (has("business-analyst") && has("legal-compliance"))
+    edges.push(["business-analyst", "legal-compliance"]);
+  if (has("business-analyst") && has("ux-ui-designer"))
+    edges.push(["business-analyst", "ux-ui-designer"]);
+  if (has("business-analyst") && has("system-architect"))
+    edges.push(["business-analyst", "system-architect"]);
+
+  // Architect + Designer → Tech Lead
+  if (has("system-architect") && has("tech-lead"))
+    edges.push(["system-architect", "tech-lead"]);
+  if (has("ux-ui-designer") && has("tech-lead"))
+    edges.push(["ux-ui-designer", "tech-lead"]);
+
+  // Tech Lead → Backend, Frontend
+  if (has("tech-lead") && has("backend-developer"))
+    edges.push(["tech-lead", "backend-developer"]);
+  if (has("tech-lead") && has("frontend-developer"))
+    edges.push(["tech-lead", "frontend-developer"]);
+
+  // Code → QA, Security, DevOps
+  for (const dev of ["backend-developer", "frontend-developer"]) {
+    if (!has(dev)) continue;
+    for (const qa of ["qa-engineer", "security-engineer", "devops-engineer"]) {
+      if (has(qa)) edges.push([dev, qa]);
+    }
+  }
+
+  // QA/Security/DevOps → Release Manager
+  for (const qa of ["qa-engineer", "security-engineer", "devops-engineer"]) {
+    if (has(qa) && has("release-manager"))
+      edges.push([qa, "release-manager"]);
+  }
+
+  // Marketing from PO
+  if (has("product-marketer"))
+    edges.push(["product-owner", "product-marketer"]);
+  if (has("product-marketer") && has("smm-manager"))
+    edges.push(["product-marketer", "smm-manager"]);
+  if (has("product-marketer") && has("content-creator"))
+    edges.push(["product-marketer", "content-creator"]);
+
+  // Feedback after release
+  if (has("release-manager") && has("customer-support"))
+    edges.push(["release-manager", "customer-support"]);
+  if (has("customer-support") && has("data-analyst"))
+    edges.push(["customer-support", "data-analyst"]);
+  if (has("content-creator") && has("data-analyst"))
+    edges.push(["content-creator", "data-analyst"]);
+
+  state.pipeline_graph.nodes = Array.from(nodes);
+  state.pipeline_graph.edges = edges;
+
+  // Build parallel groups from present agents
+  const pGroups: string[][] = [];
+  const devPair = ["backend-developer", "frontend-developer"].filter(has);
+  if (devPair.length > 1) pGroups.push(devPair);
+  const qaPair = ["qa-engineer", "security-engineer", "devops-engineer"].filter(has);
+  if (qaPair.length > 1) pGroups.push(qaPair);
+  const mktPair = ["smm-manager", "content-creator"].filter(has);
+  if (mktPair.length > 1) pGroups.push(mktPair);
+  state.pipeline_graph.parallel_groups = pGroups;
+
+  // Add state for new agents
+  for (const nodeId of state.pipeline_graph.nodes) {
     if (!state.agents[nodeId]) {
       state.agents[nodeId] = {
         status: "pending",
@@ -676,6 +813,11 @@ function finalizeAgent(
     state.agents[agentId].status = "completed";
     state.agents[agentId].artifacts = collectArtifacts(outputDir, projectDir);
     state.agents[agentId].error = null;
+
+    // After Pipeline Architect completes → expand graph from its output
+    if (agentId === "pipeline-architect") {
+      expandPipelineFromArchitect(state, id);
+    }
   } else {
     state.agents[agentId].status = "failed";
     state.agents[agentId].error = errorMsg || "Неизвестная ошибка";
