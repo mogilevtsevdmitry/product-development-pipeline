@@ -55,12 +55,23 @@ export const GATE_LABELS: Record<GateType, string> = {
 
 // --- Agent State ---
 
+export interface AgentUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_tokens: number;
+  cache_read_tokens: number;
+  cost_usd: number;
+  duration_ms: number;
+  model?: string;
+}
+
 export interface AgentState {
   status: AgentStatus;
   started_at?: string | null;
   completed_at?: string | null;
   artifacts: string[];
   error?: string | null;
+  usage?: AgentUsage | null;
 }
 
 // --- Pipeline Graph ---

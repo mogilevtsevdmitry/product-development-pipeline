@@ -355,7 +355,7 @@ export default function ProjectPage({
       )}
 
       {/* Stats Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
         <div className="rounded-lg border border-gray-800 bg-gray-900 p-3">
           <div className="text-xs text-gray-500 mb-1">Всего агентов</div>
           <div className="text-xl font-bold text-white">{totalAgents}</div>
@@ -396,6 +396,31 @@ export default function ProjectPage({
             {state.mode === "human_approval" ? "Ручной" : "Авто"}
           </div>
         </div>
+        {/* Cost stats */}
+        {(() => {
+          const agents = Object.values(state.agents);
+          const totalCost = agents.reduce((s, a) => s + (a.usage?.cost_usd || 0), 0);
+          const totalTokensIn = agents.reduce((s, a) => s + (a.usage?.input_tokens || 0) + (a.usage?.cache_creation_tokens || 0) + (a.usage?.cache_read_tokens || 0), 0);
+          const totalTokensOut = agents.reduce((s, a) => s + (a.usage?.output_tokens || 0), 0);
+          return (
+            <>
+              <div className="rounded-lg border border-gray-800 bg-gray-900 p-3">
+                <div className="text-xs text-gray-500 mb-1">💰 Стоимость</div>
+                <div className="text-xl font-bold text-amber-400">
+                  ${totalCost.toFixed(2)}
+                </div>
+              </div>
+              <div className="rounded-lg border border-gray-800 bg-gray-900 p-3">
+                <div className="text-xs text-gray-500 mb-1">📊 Токены</div>
+                <div className="text-sm font-medium text-gray-300">
+                  <span className="text-blue-400">↓{(totalTokensIn/1000).toFixed(0)}K</span>
+                  {" / "}
+                  <span className="text-emerald-400">↑{(totalTokensOut/1000).toFixed(0)}K</span>
+                </div>
+              </div>
+            </>
+          );
+        })()}
       </div>
 
       {/* Gate Panel */}

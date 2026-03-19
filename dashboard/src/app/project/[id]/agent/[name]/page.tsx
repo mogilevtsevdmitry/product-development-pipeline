@@ -258,6 +258,49 @@ export default function AgentDetailPage({
           </dl>
         </div>
 
+        {/* Usage / Cost */}
+        {agent.usage && (
+          <div className="rounded-xl border border-gray-800 bg-gray-900 p-6">
+            <h3 className="font-semibold text-white mb-4">📊 Использование токенов</h3>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div>
+                <div className="text-xs text-gray-500 mb-1">Стоимость</div>
+                <div className="text-lg font-bold text-amber-400">
+                  ${agent.usage.cost_usd.toFixed(4)}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500 mb-1">Длительность</div>
+                <div className="text-lg font-bold text-blue-400">
+                  {(agent.usage.duration_ms / 1000).toFixed(1)}с
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500 mb-1">Input tokens</div>
+                <div className="text-sm text-gray-300">
+                  {agent.usage.input_tokens.toLocaleString()}
+                  {agent.usage.cache_creation_tokens > 0 && (
+                    <span className="text-xs text-gray-500 ml-1">
+                      +{agent.usage.cache_creation_tokens.toLocaleString()} cache
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500 mb-1">Output tokens</div>
+                <div className="text-sm text-gray-300">
+                  {agent.usage.output_tokens.toLocaleString()}
+                </div>
+              </div>
+            </div>
+            {agent.usage.model && (
+              <div className="mt-3 text-xs text-gray-500">
+                Модель: {agent.usage.model}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Dependencies */}
         {dependencies.length > 0 && (
           <div className="rounded-xl border border-gray-800 bg-gray-900 p-6">

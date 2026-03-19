@@ -1049,7 +1049,8 @@ function finalizeAgent(
   id: string,
   agentId: string,
   success: boolean,
-  errorMsg?: string
+  errorMsg?: string,
+  usage?: import("./types").AgentUsage | null
 ): void {
   const state = getProjectState(id);
   if (!state) return;
@@ -1073,6 +1074,11 @@ function finalizeAgent(
   } else {
     state.agents[agentId].status = "failed";
     state.agents[agentId].error = errorMsg || "Неизвестная ошибка";
+  }
+
+  // Save usage/cost data
+  if (usage) {
+    state.agents[agentId].usage = usage;
   }
   state.agents[agentId].completed_at = new Date().toISOString();
   state.updated_at = new Date().toISOString();
@@ -1122,7 +1128,7 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
 
   const child = spawn(
     "/bin/sh",
-    ["-c", `cat "${tmpFile}" | claude --print --dangerously-skip-permissions`],
+    ["-c", `cat "${tmpFile}" | claude --print --output-format json --dangerously-skip-permissions`],
     {
       cwd: outputDir,
       stdio: ["ignore", "pipe", "pipe"],
@@ -1164,11 +1170,28 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
       ``,
     ];
 
-    if (stdout.trim()) {
+    if (resultText || stdout.trim()) {
       logParts.push(
         `## Ответ модели`,
         ``,
-        stdout.trim(),
+        resultText || stdout.trim(),
+        ``,
+      );
+    }
+
+    if (usageData) {
+      logParts.push(
+        `## Использование токенов`,
+        ``,
+        `| Метрика | Значение |`,
+        `|---------|----------|`,
+        `| Модель | ${usageData.model || "—"} |`,
+        `| Input tokens | ${usageData.input_tokens.toLocaleString()} |`,
+        `| Output tokens | ${usageData.output_tokens.toLocaleString()} |`,
+        `| Cache creation | ${usageData.cache_creation_tokens.toLocaleString()} |`,
+        `| Cache read | ${usageData.cache_read_tokens.toLocaleString()} |`,
+        `| Стоимость | $${usageData.cost_usd.toFixed(4)} |`,
+        `| Длительность | ${(usageData.duration_ms / 1000).toFixed(1)}с |`,
         ``,
       );
     }
@@ -1193,18 +1216,50 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
     const logFile = path.join(outputDir, "_reasoning.md");
     fs.writeFileSync(logFile, logParts.join("\n"), "utf-8");
 
-    if (code === 0 && stdout.trim()) {
+    // Parse JSON output from claude --output-format json
+    let resultText = "";
+    let usageData: import("./types").AgentUsage | null = null;
+
+    try {
+      const jsonResult = JSON.parse(stdout.trim());
+      resultText = jsonResult.result || "";
+      if (jsonResult.usage || jsonResult.total_cost_usd !== undefined) {
+        const u = jsonResult.usage || {};
+        const modelKeys = jsonResult.modelUsage ? Object.keys(jsonResult.modelUsage) : [];
+        const modelName = modelKeys[0] || undefined;
+        usageData = {
+          input_tokens: u.input_tokens || 0,
+          output_tokens: u.output_tokens || 0,
+          cache_creation_tokens: u.cache_creation_input_tokens || 0,
+          cache_read_tokens: u.cache_read_input_tokens || 0,
+          cost_usd: jsonResult.total_cost_usd || 0,
+          duration_ms: jsonResult.duration_ms || (Date.now() - startTime),
+          model: modelName,
+        };
+      }
+
+      // Save usage to a JSON file for easy access
+      if (usageData) {
+        const usageFile = path.join(outputDir, "_usage.json");
+        fs.writeFileSync(usageFile, JSON.stringify(usageData, null, 2), "utf-8");
+      }
+    } catch {
+      // Not valid JSON — use raw stdout
+      resultText = stdout.trim();
+    }
+
+    if (code === 0 && resultText) {
       const outputFile = path.join(outputDir, `${agentId}-output.md`);
-      fs.writeFileSync(outputFile, stdout.trim(), "utf-8");
-      finalizeAgent(id, agentId, true);
+      fs.writeFileSync(outputFile, resultText, "utf-8");
+      finalizeAgent(id, agentId, true, undefined, usageData);
     } else if (code === 0) {
-      finalizeAgent(id, agentId, true);
+      finalizeAgent(id, agentId, true, undefined, usageData);
     } else {
       const errorParts: string[] = [];
       if (stderr.trim()) errorParts.push(stderr.trim());
-      if (stdout.trim()) errorParts.push(stdout.trim());
+      if (resultText) errorParts.push(resultText);
       const errorMsg = errorParts.join("\n\n") || `Процесс завершился с кодом ${code}`;
-      finalizeAgent(id, agentId, false, errorMsg.slice(0, 3000));
+      finalizeAgent(id, agentId, false, errorMsg.slice(0, 3000), usageData);
     }
   });
 
