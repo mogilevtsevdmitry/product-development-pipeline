@@ -9,3 +9,5 @@ orchestrator/state/*.json
 dashboard/.next/
 .DS_Store
 *.log
+dashboard/next-env.d.ts
+dashboard/tsconfig.tsbuildinfo
