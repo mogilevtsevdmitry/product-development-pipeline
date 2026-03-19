@@ -104,6 +104,13 @@ export function getProjectState(id: string): ProjectState | null {
   return state;
 }
 
+export function saveProjectState(id: string, state: ProjectState): void {
+  ensureDir(STATE_DIR);
+  const filePath = path.join(STATE_DIR, `${id}.json`);
+  state.updated_at = new Date().toISOString();
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+}
+
 function getAgentPhase(agentId: string): string {
   const phaseMap: Record<string, string> = {
     "pipeline-architect": "meta", "orchestrator": "meta",
@@ -972,6 +979,26 @@ function collectInputContext(
     if (tree) {
       parts.push(`\n--- Структура проекта ---\n${tree}\n`);
     }
+  }
+
+  // Add feedback received (bug reports, security issues returned from QA/Security/DevOps)
+  const feedback = state.agents[agentId]?.feedback_received?.filter(f => !f.resolved) || [];
+  if (feedback.length > 0) {
+    parts.push(`\n# ⚠️ ИСПРАВЛЕНИЯ ТРЕБУЮТСЯ — Feedback от других агентов\n`);
+    parts.push(`Тебе вернули задачу с замечаниями. ТЫ ДОЛЖЕН ИСПРАВИТЬ каждую проблему.\n`);
+    parts.push(`НЕ ПЕРЕПИСЫВАЙ весь код. Исправь ТОЛЬКО указанные проблемы.\n`);
+    for (const fb of feedback) {
+      const severityEmoji = {
+        critical: "🔴 CRITICAL",
+        high: "🟠 HIGH",
+        medium: "🟡 MEDIUM",
+        low: "🟢 LOW",
+      }[fb.severity] || fb.severity;
+
+      parts.push(`\n## ${severityEmoji} — от ${fb.from_agent}`);
+      parts.push(`${fb.description}\n`);
+    }
+    parts.push(`\nПосле исправления каждой проблемы укажи в отчёте что именно было исправлено.\n`);
   }
 
   return parts.join("\n");

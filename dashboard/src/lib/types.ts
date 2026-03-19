@@ -65,6 +65,16 @@ export interface AgentUsage {
   model?: string;
 }
 
+export interface FeedbackItem {
+  from_agent: string;       // кто нашёл проблему (qa-engineer, security-engineer, devops-engineer)
+  to_agent: string;         // кому вернуть (backend-developer, frontend-developer, devops-engineer)
+  severity: "critical" | "high" | "medium" | "low";
+  description: string;      // описание проблемы
+  created_at: string;
+  resolved: boolean;
+  resolved_at?: string;
+}
+
 export interface AgentState {
   status: AgentStatus;
   started_at?: string | null;
@@ -74,6 +84,8 @@ export interface AgentState {
   usage?: AgentUsage | null;
   usage_history?: AgentUsage[];  // all runs (including retries/restarts)
   total_usage?: AgentUsage | null;  // sum of all runs
+  feedback_sent?: FeedbackItem[];     // проблемы, найденные этим агентом
+  feedback_received?: FeedbackItem[]; // проблемы, полученные от других агентов
 }
 
 // --- Pipeline Graph ---

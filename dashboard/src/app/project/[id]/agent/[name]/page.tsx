@@ -5,6 +5,7 @@ import StatusBadge from "@/components/StatusBadge";
 import ArtifactViewer from "@/components/ArtifactViewer";
 import RevisionChat from "@/components/RevisionChat";
 import ReasoningView from "@/components/ReasoningView";
+import FeedbackPanel from "@/components/FeedbackPanel";
 import type { ProjectState, AgentStatus } from "@/lib/types";
 
 type Tab = "overview" | "reasoning";
@@ -457,6 +458,71 @@ export default function AgentDetailPage({
             artifactPath={openArtifact}
             onClose={() => setOpenArtifact(null)}
           />
+        )}
+
+        {/* Feedback Panel — for QA, Security, DevOps */}
+        {agent.status === "completed" && (() => {
+          const feedbackRoutes: Record<string, string[]> = {
+            "qa-engineer": ["backend-developer", "frontend-developer"],
+            "security-engineer": ["backend-developer", "frontend-developer", "devops-engineer"],
+            "devops-engineer": ["backend-developer", "frontend-developer"],
+          };
+          const targets = feedbackRoutes[agentKey];
+          if (!targets) return null;
+          // Only show targets that are in the pipeline
+          const availableTargets = targets.filter(t => state.pipeline_graph.nodes.includes(t));
+          if (availableTargets.length === 0) return null;
+          return (
+            <FeedbackPanel
+              projectId={state.project_id}
+              fromAgent={agentKey}
+              allowedTargets={availableTargets}
+            />
+          );
+        })()}
+
+        {/* Received feedback — show on developers */}
+        {agent.feedback_received && agent.feedback_received.length > 0 && (
+          <div className="rounded-xl border border-red-800/50 bg-red-900/10 p-6">
+            <h3 className="font-semibold text-red-400 mb-4">
+              ⚠️ Полученные замечания ({agent.feedback_received.filter(f => !f.resolved).length} нерешённых)
+            </h3>
+            <div className="space-y-3">
+              {agent.feedback_received.map((fb, i) => {
+                const sevColors: Record<string, string> = {
+                  critical: "border-red-600 bg-red-900/20",
+                  high: "border-orange-600 bg-orange-900/20",
+                  medium: "border-yellow-600 bg-yellow-900/20",
+                  low: "border-green-600 bg-green-900/20",
+                };
+                const sevLabels: Record<string, string> = {
+                  critical: "🔴 CRITICAL",
+                  high: "🟠 HIGH",
+                  medium: "🟡 MEDIUM",
+                  low: "🟢 LOW",
+                };
+                return (
+                  <div
+                    key={i}
+                    className={`rounded-lg border p-4 ${sevColors[fb.severity] || "border-gray-700"} ${fb.resolved ? "opacity-50" : ""}`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium">
+                        {sevLabels[fb.severity]} — от {AGENT_LABELS[fb.from_agent] || fb.from_agent}
+                      </span>
+                      {fb.resolved && (
+                        <span className="text-xs text-green-400 bg-green-900/30 px-2 py-1 rounded">✓ Исправлено</span>
+                      )}
+                    </div>
+                    <p className="text-sm text-gray-300 whitespace-pre-wrap">{fb.description}</p>
+                    <div className="text-xs text-gray-500 mt-2">
+                      {new Date(fb.created_at).toLocaleString("ru-RU")}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         )}
 
         {/* Revision Chat */}
