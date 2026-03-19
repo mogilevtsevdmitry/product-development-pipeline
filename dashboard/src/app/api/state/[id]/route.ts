@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getProjectState, resolveGate, switchMode } from "@/lib/state";
+import {
+  getProjectState,
+  resolveGate,
+  switchMode,
+  pauseProject,
+  resumeProject,
+  stopProject,
+  deleteProject,
+} from "@/lib/state";
 import type { GateType, GateDecisionValue, PipelineMode } from "@/lib/types";
 
 export async function GET(
@@ -26,43 +34,75 @@ export async function POST(
   const { id } = await params;
   const body = await request.json();
 
-  // Переключение режима
+  // --- Действия над проектом ---
+
   if (body.action === "switch_mode" && body.mode) {
-    const success = switchMode(id, body.mode as PipelineMode);
-    if (!success) {
-      return NextResponse.json(
-        { error: "Проект не найден" },
-        { status: 404 }
-      );
-    }
+    const ok = switchMode(id, body.mode as PipelineMode);
+    if (!ok) return NextResponse.json({ error: "Не удалось переключить режим" }, { status: 400 });
     return NextResponse.json({ ok: true });
   }
 
-  // Gate-решение
+  if (body.action === "pause") {
+    const ok = pauseProject(id);
+    if (!ok) return NextResponse.json({ error: "Невозможно поставить на паузу" }, { status: 400 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "resume") {
+    const ok = resumeProject(id);
+    if (!ok) return NextResponse.json({ error: "Невозможно возобновить" }, { status: 400 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "stop") {
+    const ok = stopProject(id);
+    if (!ok) return NextResponse.json({ error: "Невозможно остановить" }, { status: 400 });
+    return NextResponse.json({ ok: true });
+  }
+
+  // --- Gate-решение ---
+
   const { gate, decision, notes } = body as {
-    gate: string;
-    decision: string;
+    gate?: string;
+    decision?: string;
     notes?: string;
   };
 
   if (!gate || !decision) {
     return NextResponse.json(
-      { error: "Необходимы gate и decision" },
+      { error: "Необходимы gate и decision, либо action" },
       { status: 400 }
     );
   }
 
-  const success = resolveGate(
+  const ok = resolveGate(
     id,
     gate as GateType,
     decision as GateDecisionValue,
     notes
   );
 
-  if (!success) {
+  if (!ok) {
     return NextResponse.json(
       { error: "Не удалось обновить состояние" },
       { status: 500 }
+    );
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const ok = deleteProject(id);
+
+  if (!ok) {
+    return NextResponse.json(
+      { error: "Проект не найден" },
+      { status: 404 }
     );
   }
 

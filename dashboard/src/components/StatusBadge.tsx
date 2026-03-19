@@ -36,6 +36,16 @@ const STATUS_CONFIG: Record<
     bg: "bg-amber-400/10 text-amber-400 border-amber-400/20",
     label: "Ожидает решения",
   },
+  paused: {
+    color: "bg-yellow-400",
+    bg: "bg-yellow-400/10 text-yellow-400 border-yellow-400/20",
+    label: "На паузе",
+  },
+  stopped: {
+    color: "bg-gray-400",
+    bg: "bg-gray-400/10 text-gray-400 border-gray-400/20",
+    label: "Остановлен",
+  },
 };
 
 interface StatusBadgeProps {

@@ -207,3 +207,83 @@ export function switchMode(
   fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
   return true;
 }
+
+// ============================================================================
+// Пауза
+// ============================================================================
+
+export function pauseProject(id: string): boolean {
+  const state = getProjectState(id);
+  if (!state) return false;
+  if (state.status !== "running") return false;
+
+  state.status = "paused";
+  state.updated_at = new Date().toISOString();
+
+  const filePath = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  return true;
+}
+
+// ============================================================================
+// Возобновление
+// ============================================================================
+
+export function resumeProject(id: string): boolean {
+  const state = getProjectState(id);
+  if (!state) return false;
+  if (state.status !== "paused" && state.status !== "paused_at_gate") return false;
+
+  state.status = "running";
+  state.current_gate = null;
+  state.updated_at = new Date().toISOString();
+
+  const filePath = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  return true;
+}
+
+// ============================================================================
+// Остановка (необратимая)
+// ============================================================================
+
+export function stopProject(id: string): boolean {
+  const state = getProjectState(id);
+  if (!state) return false;
+  if (state.status === "completed" || state.status === "stopped") return false;
+
+  state.status = "stopped";
+  state.current_gate = null;
+  state.updated_at = new Date().toISOString();
+
+  // Помечаем все running/pending агенты как skipped
+  for (const agent of Object.values(state.agents)) {
+    if (agent.status === "running" || agent.status === "pending") {
+      agent.status = "skipped";
+    }
+  }
+
+  const filePath = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  return true;
+}
+
+// ============================================================================
+// Удаление проекта
+// ============================================================================
+
+export function deleteProject(id: string): boolean {
+  const stateFile = path.join(STATE_DIR, `${id}.json`);
+  if (!fs.existsSync(stateFile)) return false;
+
+  // Удаляем state JSON
+  fs.unlinkSync(stateFile);
+
+  // Удаляем папку проекта (артефакты)
+  const projectDir = path.join(PROJECTS_DIR, id);
+  if (fs.existsSync(projectDir)) {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  }
+
+  return true;
+}

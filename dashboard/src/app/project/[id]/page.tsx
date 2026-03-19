@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, use } from "react";
+import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import StatusBadge from "@/components/StatusBadge";
 import GatePanel from "@/components/GatePanel";
@@ -45,8 +46,11 @@ export default function ProjectPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const router = useRouter();
   const [state, setState] = useState<ProjectState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const fetchState = useCallback(async () => {
     try {
@@ -62,6 +66,29 @@ export default function ProjectPage({
       setError("Ошибка загрузки");
     }
   }, [id]);
+
+  const sendAction = useCallback(
+    async (action: string, method: "POST" | "DELETE" = "POST") => {
+      setActionLoading(action);
+      try {
+        const res = await fetch(`/api/state/${id}`, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          ...(method === "POST" ? { body: JSON.stringify({ action }) } : {}),
+        });
+        if (res.ok) {
+          if (action === "delete") {
+            router.push("/");
+            return;
+          }
+          await fetchState();
+        }
+      } finally {
+        setActionLoading(null);
+      }
+    },
+    [id, fetchState, router]
+  );
 
   useEffect(() => {
     fetchState();
@@ -113,7 +140,96 @@ export default function ProjectPage({
           <h1 className="text-2xl font-bold text-white">{state.name}</h1>
           <p className="text-gray-500 text-sm font-mono mt-1">{state.project_id}</p>
         </div>
-        <StatusBadge status={state.status as ProjectStatus} />
+        <div className="flex items-center gap-3">
+          <StatusBadge status={state.status as ProjectStatus} />
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="flex flex-wrap items-center gap-2 mb-6 p-4 rounded-xl border border-gray-800 bg-gray-900">
+        {/* Pause / Resume */}
+        {state.status === "running" && (
+          <button
+            onClick={() => sendAction("pause")}
+            disabled={actionLoading !== null}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-yellow-600/40 bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 transition-colors disabled:opacity-50"
+          >
+            ⏸ Пауза
+          </button>
+        )}
+        {(state.status === "paused" || state.status === "paused_at_gate") && (
+          <button
+            onClick={() => sendAction("resume")}
+            disabled={actionLoading !== null}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-emerald-600/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+          >
+            ▶ Возобновить
+          </button>
+        )}
+
+        {/* Stop */}
+        {(state.status === "running" || state.status === "paused" || state.status === "paused_at_gate") && (
+          <button
+            onClick={() => sendAction("stop")}
+            disabled={actionLoading !== null}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-red-600/40 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors disabled:opacity-50"
+          >
+            ⏹ Остановить
+          </button>
+        )}
+
+        {/* Mode toggle */}
+        <button
+          disabled={actionLoading !== null || state.status === "stopped" || state.status === "completed"}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-700 bg-gray-800 text-gray-300 hover:bg-gray-700 transition-colors disabled:opacity-50"
+          onClick={async () => {
+            setActionLoading("switch_mode");
+            try {
+              const newMode = state.mode === "auto" ? "human_approval" : "auto";
+              await fetch(`/api/state/${id}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "switch_mode", mode: newMode }),
+              });
+              await fetchState();
+            } finally {
+              setActionLoading(null);
+            }
+          }}
+        >
+          {state.mode === "auto" ? "👤 Ручной режим" : "🤖 Авто режим"}
+        </button>
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Delete */}
+        {!showDeleteConfirm ? (
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            disabled={actionLoading !== null}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+          >
+            🗑 Удалить
+          </button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-red-400">Удалить проект?</span>
+            <button
+              onClick={() => sendAction("delete", "DELETE")}
+              disabled={actionLoading !== null}
+              className="px-3 py-1.5 text-sm font-medium rounded-lg bg-red-600 text-white hover:bg-red-500 transition-colors disabled:opacity-50"
+            >
+              Да, удалить
+            </button>
+            <button
+              onClick={() => setShowDeleteConfirm(false)}
+              className="px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-700 text-gray-400 hover:text-gray-300 transition-colors"
+            >
+              Отмена
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Stats Bar */}

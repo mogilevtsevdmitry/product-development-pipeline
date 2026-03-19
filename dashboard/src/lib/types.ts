@@ -12,6 +12,8 @@ export type PipelineMode = "auto" | "human_approval";
 export type ProjectStatus =
   | "running"
   | "paused_at_gate"
+  | "paused"
+  | "stopped"
   | "completed"
   | "failed";
 
