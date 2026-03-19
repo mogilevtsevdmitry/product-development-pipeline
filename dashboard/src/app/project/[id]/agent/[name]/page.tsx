@@ -4,7 +4,56 @@ import { useEffect, useState, use } from "react";
 import StatusBadge from "@/components/StatusBadge";
 import type { ProjectState, AgentStatus } from "@/lib/types";
 
-function formatDate(iso?: string): string {
+// Agent display names
+const AGENT_LABELS: Record<string, string> = {
+  "problem-researcher": "Problem Researcher",
+  "market-researcher": "Market Researcher",
+  "product-owner": "Product Owner",
+  "pipeline-architect": "Pipeline Architect",
+  "business-analyst": "Business Analyst",
+  "legal-compliance": "Legal / Compliance",
+  "ux-ui-designer": "UX/UI Designer",
+  "system-architect": "System Architect",
+  "tech-lead": "Tech Lead",
+  "backend-developer": "Backend Developer",
+  "frontend-developer": "Frontend Developer",
+  "devops-engineer": "DevOps Engineer",
+  "qa-engineer": "QA Engineer",
+  "security-engineer": "Security Engineer",
+  "release-manager": "Release Manager",
+  "product-marketer": "Product Marketer",
+  "smm-manager": "SMM Manager",
+  "content-creator": "Content Creator",
+  "customer-support": "Customer Support",
+  "data-analyst": "Data Analyst",
+  orchestrator: "Orchestrator",
+};
+
+const AGENT_PHASES: Record<string, string> = {
+  "problem-researcher": "Исследование",
+  "market-researcher": "Исследование",
+  "product-owner": "Продукт",
+  "pipeline-architect": "Мета",
+  "business-analyst": "Продукт",
+  "legal-compliance": "Юридическое",
+  "ux-ui-designer": "Дизайн",
+  "system-architect": "Разработка",
+  "tech-lead": "Разработка",
+  "backend-developer": "Разработка",
+  "frontend-developer": "Разработка",
+  "devops-engineer": "Разработка",
+  "qa-engineer": "Качество",
+  "security-engineer": "Качество",
+  "release-manager": "Релиз",
+  "product-marketer": "Маркетинг",
+  "smm-manager": "Маркетинг",
+  "content-creator": "Маркетинг",
+  "customer-support": "Фидбек",
+  "data-analyst": "Фидбек",
+  orchestrator: "Мета",
+};
+
+function formatDate(iso?: string | null): string {
   if (!iso) return "—";
   try {
     return new Date(iso).toLocaleString("ru-RU", {
@@ -18,6 +67,16 @@ function formatDate(iso?: string): string {
   } catch {
     return iso;
   }
+}
+
+/**
+ * Find dependencies for an agent from the graph edges.
+ */
+function getDependencies(
+  agentId: string,
+  edges: [string, string][]
+): string[] {
+  return edges.filter(([, tgt]) => tgt === agentId).map(([src]) => src);
 }
 
 export default function AgentDetailPage({
@@ -71,7 +130,9 @@ export default function AgentDetailPage({
 
   const agentKey = decodeURIComponent(name);
   const agent = state.agents[agentKey];
-  const graphNode = state.pipeline_graph.nodes.find((n) => n.id === agentKey);
+  const label = AGENT_LABELS[agentKey] || agentKey;
+  const phase = AGENT_PHASES[agentKey] || "—";
+  const dependencies = getDependencies(agentKey, state.pipeline_graph.edges);
 
   if (!agent) {
     return (
@@ -106,18 +167,16 @@ export default function AgentDetailPage({
           href={`/project/${id}`}
           className="text-gray-500 hover:text-gray-300 transition-colors"
         >
-          {state.project_name}
+          {state.name}
         </a>
         <span className="text-gray-600">/</span>
-        <span className="text-gray-300">{graphNode?.label || agentKey}</span>
+        <span className="text-gray-300">{label}</span>
       </div>
 
       {/* Header */}
       <div className="flex items-start justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-white">
-            {graphNode?.label || agentKey}
-          </h1>
+          <h1 className="text-2xl font-bold text-white">{label}</h1>
           <p className="text-gray-500 text-sm font-mono mt-1">{agentKey}</p>
         </div>
         <StatusBadge status={agent.status as AgentStatus} />
@@ -131,14 +190,12 @@ export default function AgentDetailPage({
           <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
             <div>
               <dt className="text-gray-500 mb-1">Фаза</dt>
-              <dd className="text-gray-200 font-medium">
-                {graphNode?.phase || agent.phase || "—"}
-              </dd>
+              <dd className="text-gray-200 font-medium">{phase}</dd>
             </div>
             <div>
               <dt className="text-gray-500 mb-1">Статус</dt>
               <dd>
-                <StatusBadge status={agent.status} size="sm" />
+                <StatusBadge status={agent.status as AgentStatus} size="sm" />
               </dd>
             </div>
             <div>
@@ -153,19 +210,33 @@ export default function AgentDetailPage({
         </div>
 
         {/* Dependencies */}
-        {agent.depends_on && agent.depends_on.length > 0 && (
+        {dependencies.length > 0 && (
           <div className="rounded-xl border border-gray-800 bg-gray-900 p-6">
             <h3 className="font-semibold text-white mb-3">Зависимости</h3>
             <div className="flex flex-wrap gap-2">
-              {agent.depends_on.map((dep) => (
-                <a
-                  key={dep}
-                  href={`/project/${id}/agent/${encodeURIComponent(dep)}`}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 text-sm text-gray-300 hover:border-blue-500 hover:text-blue-400 transition-colors"
-                >
-                  {dep}
-                </a>
-              ))}
+              {dependencies.map((dep) => {
+                const depStatus = state.agents[dep]?.status || "pending";
+                return (
+                  <a
+                    key={dep}
+                    href={`/project/${id}/agent/${encodeURIComponent(dep)}`}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 text-sm text-gray-300 hover:border-blue-500 hover:text-blue-400 transition-colors"
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${
+                        depStatus === "completed"
+                          ? "bg-emerald-400"
+                          : depStatus === "running"
+                          ? "bg-blue-400"
+                          : depStatus === "failed"
+                          ? "bg-red-400"
+                          : "bg-gray-500"
+                      }`}
+                    />
+                    {AGENT_LABELS[dep] || dep}
+                  </a>
+                );
+              })}
             </div>
           </div>
         )}
@@ -187,26 +258,24 @@ export default function AgentDetailPage({
             <p className="text-gray-500 text-sm">Нет артефактов</p>
           ) : (
             <div className="space-y-2">
-              {agent.artifacts.map((artifact, i) => (
-                <div
-                  key={i}
-                  className="flex items-center justify-between rounded-lg bg-gray-950 border border-gray-800 px-4 py-3"
-                >
-                  <div>
-                    <div className="text-sm font-medium text-gray-200">
-                      {artifact.name}
-                    </div>
-                    <div className="text-xs text-gray-500 font-mono mt-0.5">
-                      {artifact.path}
+              {agent.artifacts.map((artifactPath, i) => {
+                const fileName = artifactPath.split("/").pop() || artifactPath;
+                return (
+                  <div
+                    key={i}
+                    className="flex items-center justify-between rounded-lg bg-gray-950 border border-gray-800 px-4 py-3"
+                  >
+                    <div>
+                      <div className="text-sm font-medium text-gray-200">
+                        📄 {fileName}
+                      </div>
+                      <div className="text-xs text-gray-500 font-mono mt-0.5">
+                        {artifactPath}
+                      </div>
                     </div>
                   </div>
-                  {artifact.type && (
-                    <span className="text-xs text-gray-500 bg-gray-800 px-2 py-1 rounded">
-                      {artifact.type}
-                    </span>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
