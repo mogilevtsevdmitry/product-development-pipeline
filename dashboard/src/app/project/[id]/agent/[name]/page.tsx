@@ -2,6 +2,8 @@
 
 import { useEffect, useState, use } from "react";
 import StatusBadge from "@/components/StatusBadge";
+import ArtifactViewer from "@/components/ArtifactViewer";
+import RevisionChat from "@/components/RevisionChat";
 import type { ProjectState, AgentStatus } from "@/lib/types";
 
 // Agent display names
@@ -88,6 +90,7 @@ export default function AgentDetailPage({
   const [state, setState] = useState<ProjectState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [restarting, setRestarting] = useState(false);
+  const [openArtifact, setOpenArtifact] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -291,10 +294,18 @@ export default function AgentDetailPage({
             <div className="space-y-2">
               {agent.artifacts.map((artifactPath, i) => {
                 const fileName = artifactPath.split("/").pop() || artifactPath;
+                const isOpen = openArtifact === artifactPath;
                 return (
-                  <div
+                  <button
                     key={i}
-                    className="flex items-center justify-between rounded-lg bg-gray-950 border border-gray-800 px-4 py-3"
+                    onClick={() =>
+                      setOpenArtifact(isOpen ? null : artifactPath)
+                    }
+                    className={`w-full text-left flex items-center justify-between rounded-lg border px-4 py-3 transition-colors ${
+                      isOpen
+                        ? "bg-blue-950/30 border-blue-700/50"
+                        : "bg-gray-950 border-gray-800 hover:border-gray-600"
+                    }`}
                   >
                     <div>
                       <div className="text-sm font-medium text-gray-200">
@@ -304,12 +315,33 @@ export default function AgentDetailPage({
                         {artifactPath}
                       </div>
                     </div>
-                  </div>
+                    <span className="text-xs text-gray-500">
+                      {isOpen ? "▼ Закрыть" : "▶ Открыть"}
+                    </span>
+                  </button>
                 );
               })}
             </div>
           )}
         </div>
+
+        {/* Artifact Viewer */}
+        {openArtifact && (
+          <ArtifactViewer
+            projectId={state.project_id}
+            artifactPath={openArtifact}
+            onClose={() => setOpenArtifact(null)}
+          />
+        )}
+
+        {/* Revision Chat */}
+        {agent.status === "completed" || agent.status === "running" || agent.status === "failed" ? (
+          <RevisionChat
+            projectId={state.project_id}
+            agentId={agentKey}
+            agentStatus={agent.status}
+          />
+        ) : null}
       </div>
     </div>
   );
