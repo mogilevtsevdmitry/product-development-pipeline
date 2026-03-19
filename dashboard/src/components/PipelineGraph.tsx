@@ -94,7 +94,8 @@ const PHASE_ORDER = [
  */
 function layoutNodes(
   graph: PipelineGraphType,
-  agents: Record<string, AgentState>
+  agents: Record<string, AgentState>,
+  projectId: string
 ): { nodes: Node[]; edges: Edge[] } {
   const nodeIds = graph.nodes; // string[]
   const edgePairs = graph.edges; // [string, string][]
@@ -162,6 +163,7 @@ function layoutNodes(
           label: AGENT_LABELS[id] || id,
           phase: AGENT_PHASES[id] || "other",
           status,
+          projectId,
         },
       });
     }
@@ -186,8 +188,8 @@ export default function PipelineGraph({
   const router = useRouter();
 
   const { nodes: layoutedNodes, edges: layoutedEdges } = useMemo(
-    () => layoutNodes(graph, agents),
-    [graph, agents]
+    () => layoutNodes(graph, agents, projectId),
+    [graph, agents, projectId]
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutedNodes);

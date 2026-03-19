@@ -11,6 +11,8 @@ import {
   startPipeline,
   restartAgent,
   reactivateToGate,
+  pauseAgent,
+  runSpecificAgent,
 } from "@/lib/state";
 import type { GateType, GateDecisionValue, PipelineMode } from "@/lib/types";
 
@@ -84,6 +86,17 @@ export async function POST(
     const ok = restartAgent(id, body.agentId);
     if (!ok) return NextResponse.json({ error: "Не удалось перезапустить агента" }, { status: 400 });
     return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "pause_agent" && body.agentId) {
+    const ok = pauseAgent(id, body.agentId);
+    if (!ok) return NextResponse.json({ error: "Агент не запущен" }, { status: 400 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "run_agent" && body.agentId) {
+    const result = runSpecificAgent(id, body.agentId);
+    return NextResponse.json(result, { status: result.ok ? 200 : 400 });
   }
 
   // --- Gate-решение ---

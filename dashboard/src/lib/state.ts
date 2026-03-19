@@ -805,6 +805,9 @@ function finalizeAgent(
   const state = getProjectState(id);
   if (!state) return;
 
+  // If agent was paused/reset while running — don't overwrite
+  if (state.agents[agentId]?.status !== "running") return;
+
   const phase = AGENT_PHASES[agentId] || "other";
   const outputDir = path.join(PROJECTS_DIR, id, phase, agentId);
   const projectDir = path.join(PROJECTS_DIR, id);
@@ -988,7 +991,7 @@ export function startPipeline(id: string): {
 }
 
 // ============================================================================
-// Перезапуск агента
+// Управление отдельным агентом
 // ============================================================================
 
 export function restartAgent(id: string, agentId: string): boolean {
@@ -998,23 +1001,69 @@ export function restartAgent(id: string, agentId: string): boolean {
   const agent = state.agents[agentId];
   if (!agent) return false;
 
-  // Сбрасываем агента в pending
   agent.status = "pending";
   agent.started_at = null;
   agent.completed_at = null;
   agent.artifacts = [];
   agent.error = null;
 
-  // Если проект был failed из-за этого агента — возвращаем в running
   if (state.status === "failed" || state.status === "stopped") {
     state.status = "running";
   }
 
   state.updated_at = new Date().toISOString();
-
   const filePath = path.join(STATE_DIR, `${id}.json`);
   fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
   return true;
+}
+
+/**
+ * Pause a single running agent — sets it back to pending.
+ * The background process will still finish, but finalizeAgent
+ * will see status != running and skip the update.
+ */
+export function pauseAgent(id: string, agentId: string): boolean {
+  const state = getProjectState(id);
+  if (!state) return false;
+  const agent = state.agents[agentId];
+  if (!agent || agent.status !== "running") return false;
+
+  agent.status = "pending";
+  agent.started_at = null;
+  agent.error = "Остановлен вручную";
+  state.updated_at = new Date().toISOString();
+
+  const fp = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(fp, JSON.stringify(state, null, 2), "utf-8");
+  return true;
+}
+
+/**
+ * Run a specific agent by ID (not just "next ready").
+ */
+export function runSpecificAgent(id: string, agentId: string): {
+  ok: boolean;
+  error?: string;
+} {
+  const state = getProjectState(id);
+  if (!state) return { ok: false, error: "Проект не найден" };
+  const agent = state.agents[agentId];
+  if (!agent) return { ok: false, error: "Агент не найден" };
+  if (agent.status === "running") return { ok: true, error: "Уже работает" };
+  if (agent.status === "completed") return { ok: false, error: "Уже завершён" };
+
+  // Reset if needed
+  agent.status = "running";
+  agent.started_at = new Date().toISOString();
+  agent.error = null;
+  if (state.status !== "running") state.status = "running";
+  state.updated_at = new Date().toISOString();
+
+  const fp = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(fp, JSON.stringify(state, null, 2), "utf-8");
+
+  spawnAgent(id, agentId, state);
+  return { ok: true };
 }
 
 // ============================================================================
