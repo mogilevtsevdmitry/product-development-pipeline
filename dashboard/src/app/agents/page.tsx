@@ -345,8 +345,17 @@ export default function AgentsPage() {
                         </h3>
                       </div>
                       {agent.automationLevel && (
-                        <span className="text-xs text-gray-500 bg-gray-700/50 px-2 py-0.5 rounded shrink-0">
+                        <span className="relative group/tip text-xs text-gray-500 bg-gray-700/50 px-2 py-0.5 rounded shrink-0 cursor-help">
                           {agent.automationLevel}
+                          <span className="absolute bottom-full right-0 mb-2 w-56 p-2.5 bg-gray-900 border border-gray-700 rounded-lg text-xs text-gray-300 leading-relaxed opacity-0 invisible group-hover/tip:opacity-100 group-hover/tip:visible transition-all duration-150 z-50 shadow-xl pointer-events-none">
+                            <span className="font-semibold text-white block mb-1">Уровень автоматизации</span>
+                            {parseInt(agent.automationLevel) >= 80
+                              ? "Почти полностью автономный — минимум ручного контроля"
+                              : parseInt(agent.automationLevel) >= 60
+                              ? "Автоматизирован частично — ключевые решения принимает человек"
+                              : "Низкая автоматизация — требуется активное участие человека"}
+                            <span className="absolute -bottom-1 right-4 w-2 h-2 bg-gray-900 border-r border-b border-gray-700 rotate-45" />
+                          </span>
                         </span>
                       )}
                     </div>
