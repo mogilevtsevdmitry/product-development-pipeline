@@ -675,24 +675,139 @@ function collectInputContext(
   const parts: string[] = [];
   const projectDir = path.join(PROJECTS_DIR, state.project_id);
 
+  // Max context size per artifact and total
+  const MAX_PER_ARTIFACT = 15_000; // 15K chars per file
+  const MAX_TOTAL = 80_000; // 80K chars total context
+  let totalSize = 0;
+
   for (const dep of deps) {
     const depAgent = state.agents[dep];
     if (depAgent?.status !== "completed") continue;
-    for (const artifactPath of depAgent.artifacts) {
+
+    // Prefer *-output.md (agent's own report), skip raw code/data files
+    const outputArtifacts = depAgent.artifacts.filter(
+      (a) => a.endsWith("-output.md") || a.endsWith("README.md")
+    );
+    const otherArtifacts = depAgent.artifacts.filter(
+      (a) => !a.endsWith("-output.md") && !a.endsWith("README.md")
+    );
+
+    // Primary: agent output reports (always include)
+    for (const artifactPath of outputArtifacts) {
+      if (totalSize >= MAX_TOTAL) break;
       const fullPath = path.join(projectDir, artifactPath);
-      if (fs.existsSync(fullPath)) {
-        const content = fs.readFileSync(fullPath, "utf-8");
-        parts.push(`--- Артефакт: ${artifactPath} ---\n${content}\n`);
+      if (!fs.existsSync(fullPath)) continue;
+      let content = fs.readFileSync(fullPath, "utf-8");
+      if (content.length > MAX_PER_ARTIFACT) {
+        content = content.slice(0, MAX_PER_ARTIFACT) + "\n\n... [обрезано, файл слишком большой] ...";
       }
+      parts.push(`--- Артефакт от ${dep}: ${artifactPath} ---\n${content}\n`);
+      totalSize += content.length;
+    }
+
+    // Secondary: other artifacts (include if space allows)
+    for (const artifactPath of otherArtifacts) {
+      if (totalSize >= MAX_TOTAL) break;
+      const fullPath = path.join(projectDir, artifactPath);
+      if (!fs.existsSync(fullPath)) continue;
+      const stat = fs.statSync(fullPath);
+
+      // Skip large files — provide summary instead
+      if (stat.size > MAX_PER_ARTIFACT) {
+        parts.push(
+          `--- Артефакт от ${dep}: ${artifactPath} (${Math.round(stat.size / 1024)}KB) ---\n` +
+          `[Файл слишком большой для включения. Путь: ${fullPath}]\n`
+        );
+        totalSize += 200;
+        continue;
+      }
+
+      const content = fs.readFileSync(fullPath, "utf-8");
+      parts.push(`--- Артефакт от ${dep}: ${artifactPath} ---\n${content}\n`);
+      totalSize += content.length;
+    }
+
+    // If no artifacts but agent completed — add a note
+    if (depAgent.artifacts.length === 0) {
+      parts.push(`--- ${dep}: завершён, артефактов нет ---\n`);
     }
   }
 
-  // Для первого агента передаём описание проекта
+  // For first agent — pass project description
   if (deps.length === 0 && state.description) {
     parts.push(`--- Описание проекта ---\n${state.description}\n`);
   }
 
+  // If we hit the limit, add a note
+  if (totalSize >= MAX_TOTAL) {
+    parts.push(
+      "\n--- ВНИМАНИЕ: контекст обрезан из-за ограничения размера. " +
+      "Работай с предоставленными данными. ---\n"
+    );
+  }
+
+  // Add project file tree for agents that need code context
+  const codeAgents = new Set([
+    "devops-engineer", "qa-engineer", "security-engineer",
+    "release-manager",
+  ]);
+  if (codeAgents.has(agentId)) {
+    const tree = getProjectTree(state.project_id);
+    if (tree) {
+      parts.push(`\n--- Структура проекта ---\n${tree}\n`);
+    }
+  }
+
   return parts.join("\n");
+}
+
+/**
+ * Get a compact file tree of the project (excluding node_modules etc).
+ */
+function getProjectTree(projectId: string, maxDepth = 4): string {
+  const projectDir = path.join(PROJECTS_DIR, projectId);
+  if (!fs.existsSync(projectDir)) return "";
+
+  const lines: string[] = [];
+  function walk(dir: string, prefix: string, depth: number) {
+    if (depth > maxDepth) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch { return; }
+
+    // Filter and sort
+    entries = entries
+      .filter((e) => !SKIP_DIRS.has(e.name) && !e.name.startsWith("."))
+      .sort((a, b) => {
+        if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+
+    // Limit entries per directory
+    const shown = entries.slice(0, 30);
+    const hidden = entries.length - shown.length;
+
+    for (const entry of shown) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        lines.push(`${prefix}${entry.name}/`);
+        walk(full, prefix + "  ", depth + 1);
+      } else {
+        const stat = fs.statSync(full);
+        const sizeStr = stat.size > 1024
+          ? `${Math.round(stat.size / 1024)}KB`
+          : `${stat.size}B`;
+        lines.push(`${prefix}${entry.name} (${sizeStr})`);
+      }
+    }
+    if (hidden > 0) {
+      lines.push(`${prefix}... ещё ${hidden} файлов`);
+    }
+  }
+
+  walk(projectDir, "", 0);
+  return lines.join("\n");
 }
 
 /**
