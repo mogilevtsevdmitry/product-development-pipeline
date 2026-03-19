@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, use } from "react";
+import { useEffect, useState, useCallback, useRef, use } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import StatusBadge from "@/components/StatusBadge";
@@ -51,6 +51,7 @@ export default function ProjectPage({
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const lastJsonRef = useRef<string>("");
 
   const fetchState = useCallback(async () => {
     try {
@@ -59,8 +60,12 @@ export default function ProjectPage({
         setError("Проект не найден");
         return;
       }
-      const data = await res.json();
-      setState(data);
+      const text = await res.text();
+      // Only update state if data actually changed — prevents re-renders and scroll jumps
+      if (text !== lastJsonRef.current) {
+        lastJsonRef.current = text;
+        setState(JSON.parse(text));
+      }
       setError(null);
     } catch {
       setError("Ошибка загрузки");
@@ -94,8 +99,12 @@ export default function ProjectPage({
   const autoAdvance = useCallback(async () => {
     const res = await fetch(`/api/state/${id}`);
     if (!res.ok) return;
-    const data = await res.json();
-    setState(data);
+    const text = await res.text();
+    if (text !== lastJsonRef.current) {
+      lastJsonRef.current = text;
+      setState(JSON.parse(text));
+    }
+    const data = JSON.parse(text);
 
     if (data.status !== "running" || data.mode !== "auto") return;
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, useRef, use } from "react";
 import StatusBadge from "@/components/StatusBadge";
 import ArtifactViewer from "@/components/ArtifactViewer";
 import RevisionChat from "@/components/RevisionChat";
@@ -91,6 +91,7 @@ export default function AgentDetailPage({
   const [error, setError] = useState<string | null>(null);
   const [restarting, setRestarting] = useState(false);
   const [openArtifact, setOpenArtifact] = useState<string | null>(null);
+  const lastJsonRef = useRef<string>("");
 
   useEffect(() => {
     async function load() {
@@ -100,8 +101,11 @@ export default function AgentDetailPage({
           setError("Проект не найден");
           return;
         }
-        const data = await res.json();
-        setState(data);
+        const text = await res.text();
+        if (text !== lastJsonRef.current) {
+          lastJsonRef.current = text;
+          setState(JSON.parse(text));
+        }
       } catch {
         setError("Ошибка загрузки");
       }

@@ -36,6 +36,8 @@ export default function RevisionChat({
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const prevCountRef = useRef(0);
+  const lastRevJsonRef = useRef<string>("");
 
   // Load revision history
   useEffect(() => {
@@ -45,7 +47,11 @@ export default function RevisionChat({
           `/api/revision?project=${encodeURIComponent(projectId)}&agent=${encodeURIComponent(agentId)}`
         );
         if (res.ok) {
-          setHistory(await res.json());
+          const text = await res.text();
+          if (text !== lastRevJsonRef.current) {
+            lastRevJsonRef.current = text;
+            setHistory(JSON.parse(text));
+          }
         }
       } catch { /* skip */ }
     }
@@ -54,10 +60,13 @@ export default function RevisionChat({
     return () => clearInterval(interval);
   }, [projectId, agentId]);
 
-  // Auto-scroll to bottom
+  // Auto-scroll only when NEW messages are added
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [history]);
+    if (history.length > prevCountRef.current) {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+    prevCountRef.current = history.length;
+  }, [history.length]);
 
   async function handleSend() {
     if (!message.trim() || sending) return;

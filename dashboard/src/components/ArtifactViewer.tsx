@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -19,6 +19,7 @@ export default function ArtifactViewer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const lastContentRef = useRef<string>("");
 
   const fileName = artifactPath.split("/").pop() || artifactPath;
 
@@ -32,7 +33,10 @@ export default function ArtifactViewer({
         return;
       }
       const data = await res.json();
-      setContent(data.content);
+      if (data.content !== lastContentRef.current) {
+        lastContentRef.current = data.content;
+        setContent(data.content);
+      }
       setError(null);
     } catch {
       setError("Ошибка загрузки");
