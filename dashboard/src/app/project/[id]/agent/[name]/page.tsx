@@ -87,6 +87,7 @@ export default function AgentDetailPage({
   const { id, name } = use(params);
   const [state, setState] = useState<ProjectState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [restarting, setRestarting] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -241,13 +242,43 @@ export default function AgentDetailPage({
           </div>
         )}
 
-        {/* Error */}
-        {agent.error && (
+        {/* Error + Restart */}
+        {(agent.status === "failed" || agent.error) && (
           <div className="rounded-xl border border-red-800/60 bg-red-950/30 p-6">
-            <h3 className="font-semibold text-red-400 mb-2">Ошибка</h3>
-            <pre className="text-sm text-red-300 whitespace-pre-wrap font-mono bg-red-950/50 rounded-lg p-4 border border-red-800/40">
-              {agent.error}
-            </pre>
+            <div className="flex items-start justify-between mb-3">
+              <h3 className="font-semibold text-red-400">Ошибка</h3>
+              <button
+                onClick={async () => {
+                  setRestarting(true);
+                  try {
+                    const res = await fetch(`/api/state/${id}`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        action: "restart_agent",
+                        agentId: agentKey,
+                      }),
+                    });
+                    if (res.ok) {
+                      // Reload state
+                      const stateRes = await fetch(`/api/state/${id}`);
+                      if (stateRes.ok) setState(await stateRes.json());
+                    }
+                  } finally {
+                    setRestarting(false);
+                  }
+                }}
+                disabled={restarting}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-red-600 text-white hover:bg-red-500 transition-colors disabled:opacity-50"
+              >
+                {restarting ? "⏳ Сброс..." : "🔄 Перезапустить"}
+              </button>
+            </div>
+            {agent.error && (
+              <pre className="text-sm text-red-300 whitespace-pre-wrap font-mono bg-red-950/50 rounded-lg p-4 border border-red-800/40">
+                {agent.error}
+              </pre>
+            )}
           </div>
         )}
 

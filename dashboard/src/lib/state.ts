@@ -578,6 +578,36 @@ export function startPipeline(id: string): {
 }
 
 // ============================================================================
+// Перезапуск агента
+// ============================================================================
+
+export function restartAgent(id: string, agentId: string): boolean {
+  const state = getProjectState(id);
+  if (!state) return false;
+
+  const agent = state.agents[agentId];
+  if (!agent) return false;
+
+  // Сбрасываем агента в pending
+  agent.status = "pending";
+  agent.started_at = null;
+  agent.completed_at = null;
+  agent.artifacts = [];
+  agent.error = null;
+
+  // Если проект был failed из-за этого агента — возвращаем в running
+  if (state.status === "failed" || state.status === "stopped") {
+    state.status = "running";
+  }
+
+  state.updated_at = new Date().toISOString();
+
+  const filePath = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  return true;
+}
+
+// ============================================================================
 // Удаление проекта
 // ============================================================================
 
