@@ -72,6 +72,12 @@ export function getProjectState(id: string): ProjectState | null {
       agent.completed_at = new Date(latestMtime).toISOString();
       agent.artifacts = collectArtifacts(outDir, projectDir);
       stateChanged = true;
+
+      // If this was pipeline-architect — expand the graph
+      if (agentId === "pipeline-architect" && state.pipeline_graph.nodes.length <= 5) {
+        console.log("[Auto-recovery] PA completed, expanding pipeline graph");
+        expandPipelineFromArchitect(state, id);
+      }
     } else {
       // No output — check if process is still alive
       const pidFile = path.join(outDir, "_pid");
@@ -94,6 +100,16 @@ export function getProjectState(id: string): ProjectState | null {
         stateChanged = true;
       }
     }
+  }
+
+  // Catch-all: if PA completed but graph was never expanded
+  if (
+    state.agents["pipeline-architect"]?.status === "completed" &&
+    state.pipeline_graph.nodes.length <= 5
+  ) {
+    console.log("[getProjectState] PA completed but graph not expanded — fixing now");
+    expandPipelineFromArchitect(state, id);
+    stateChanged = true;
   }
 
   if (stateChanged) {
