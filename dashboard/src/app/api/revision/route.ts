@@ -142,15 +142,36 @@ export async function POST(req: NextRequest) {
     systemPrompt = fs.readFileSync(path.join(agentDir, "system-prompt.md"), "utf-8");
   } catch { /* skip */ }
 
-  // Build revision prompt
+  // Load previous conversation for context continuity
+  const prevMessages = history
+    .slice(-6) // last 3 exchanges max
+    .map((h) => `[${h.role === "human" ? "Человек" : "Агент"}]: ${h.message}`)
+    .join("\n\n");
+
+  // Build revision prompt — supports both questions and tasks
   const revisionPrompt = [
     systemPrompt,
-    "\n\n# Контекст\n\nТы уже выполнил эту задачу и создал отчёт. Человек проверил результат и просит внести правки.",
-    "\n\n# Твой текущий отчёт\n\n",
+    `\n\n# Контекст
+
+Ты — ${agentId}. Ты уже выполнил свою задачу и создал артефакты (файлы ниже).
+Сейчас с тобой общается человек. Он может:
+- Задать вопрос по твоей работе → ответь кратко и по делу
+- Попросить уточнение → объясни своё решение
+- Дать задачу или правку → выполни и опиши что сделал
+- Попросить запустить что-то → выполни команду
+
+ВАЖНО:
+- НЕ повторяй весь отчёт в ответе
+- НЕ пиши "артефакты обновлены" если ничего не менял
+- Отвечай КРАТКО — 3-10 предложений для вопросов, подробнее для задач
+- Если вопрос — просто ответь, не меняй файлы
+- Если задача — выполни, потом кратко опиши результат`,
+    "\n\n# Твои текущие артефакты\n\n",
     artifactContents.join("\n"),
-    "\n\n# Правки от человека\n\n",
+    prevMessages ? `\n\n# Предыдущий диалог\n\n${prevMessages}` : "",
+    "\n\n# Сообщение от человека\n\n",
     message,
-    `\n\n# Инструкции\n\nВнеси правки, запрошенные человеком. Это может включать:\n- Обновление отчётов и документации\n- Запуск команд (docker, npm, etc.)\n- Создание/изменение файлов конфигурации\n- Тестирование и проверку работоспособности\n\nЕсли правки требуют выполнения команд — выполни их. Рабочая директория: ${agentOutputDir}\nПо завершении выведи краткий отчёт о том, что было сделано.`,
+    `\n\n# Рабочая директория: ${agentOutputDir}`,
   ].join("");
 
   // Write to temp file
@@ -175,22 +196,37 @@ export async function POST(req: NextRequest) {
   child.on("close", (code) => {
     try { fs.unlinkSync(tmpFile); } catch { /* */ }
 
-    // Save Claude's output as updated artifact
-    if (code === 0 && stdout.trim()) {
+    const response = stdout.trim();
+
+    // Only save output as artifact if agent actually modified files
+    // (not for simple Q&A responses)
+    // Heuristic: if response is short (<2000 chars) it's likely a Q&A answer, not a full report
+    if (code === 0 && response && response.length > 2000) {
       const outputFile = path.join(agentOutputDir, `${agentId}-output.md`);
-      fs.writeFileSync(outputFile, stdout.trim(), "utf-8");
+      fs.writeFileSync(outputFile, response, "utf-8");
     }
 
-    // Save agent response to revision history
+    // Save agent response to revision history (always save the actual response)
     const currentHistory: RevisionEntry[] = fs.existsSync(revisionFile)
       ? JSON.parse(fs.readFileSync(revisionFile, "utf-8"))
       : [];
 
+    // Save the ACTUAL agent response, not a template message
+    let agentMessage: string;
+    if (code !== 0) {
+      agentMessage = `❌ Ошибка:\n${[stderr, response].filter(s => s.trim()).join("\n\n") || `код ${code}`}`.slice(0, 5000);
+    } else if (response) {
+      // Truncate very long responses for chat history (keep full in artifact)
+      agentMessage = response.length > 5000
+        ? response.slice(0, 5000) + "\n\n... (ответ обрезан, полная версия в артефактах)"
+        : response;
+    } else {
+      agentMessage = "Задача выполнена (агент не вернул текстового ответа).";
+    }
+
     currentHistory.push({
       role: "agent",
-      message: code === 0
-        ? "Правки внесены. Артефакты обновлены."
-        : `Ошибка:\n${[stderr, stdout].filter(s => s.trim()).join("\n\n") || `код ${code}`}`.slice(0, 3000),
+      message: agentMessage,
       timestamp: new Date().toISOString(),
     });
     fs.writeFileSync(revisionFile, JSON.stringify(currentHistory, null, 2), "utf-8");
