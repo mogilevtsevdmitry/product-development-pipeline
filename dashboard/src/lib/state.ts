@@ -1334,7 +1334,25 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
     const pencilExists = fs.existsSync(pencilBinPath);
 
     if (pencilExists) {
-      // Use Pencil MCP server — agent can create/edit .pen files
+      // Step 1: Create empty .pen file BEFORE launching agent
+      const penFilePath = path.join(PROJECTS_DIR, id, `${id}.pen`);
+      if (!fs.existsSync(penFilePath)) {
+        fs.writeFileSync(penFilePath, JSON.stringify({
+          version: "1.0",
+          id: id,
+          name: state.name || id,
+          nodes: [],
+        }, null, 2), "utf-8");
+      }
+
+      // Step 2: Open the .pen file in Pencil app — MCP needs the app running
+      // Pencil MCP server connects to the GUI via IPC, so app must be open
+      try {
+        spawn("open", [penFilePath], { detached: true, stdio: "ignore" }).unref();
+      } catch { /* Pencil not installed — agent will use fallback wireframes.md */ }
+
+      // Step 3: Wait for Pencil to initialize before starting agent
+      // Use setTimeout to delay the actual Claude spawn
       const mcpConfig = JSON.stringify({
         mcpServers: {
           pencil: {
@@ -1343,11 +1361,8 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
           },
         },
       });
-      // Allow ALL tools (not just pencil) — agent needs Bash, Write, Edit too
-      claudeCmd = `cat "${tmpFile}" | claude --print --output-format json --dangerously-skip-permissions --mcp-config '${mcpConfig}'`;
+      claudeCmd = `sleep 3 && cat "${tmpFile}" | claude --print --output-format json --dangerously-skip-permissions --mcp-config '${mcpConfig}'`;
     }
-    // Do NOT open Pencil app at agent start — it has no file to open yet.
-    // Instead, Pencil will be opened AFTER the agent creates the .pen file (in finalizeAgent).
   }
 
   const child = spawn(
