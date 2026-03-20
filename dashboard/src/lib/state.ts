@@ -1093,21 +1093,31 @@ function prepareAgentPrompt(
     const penFilePath = path.join(PROJECTS_DIR, state.project_id, penFileName);
     agentSpecificContext = `\n\n# Создание дизайна в Pencil (.pen файл)
 
-## Обязательный порядок действий:
+## ЖЁСТКИЕ ПРАВИЛА — выполняй СТРОГО в этом порядке:
 
-1. Сначала вызови mcp__pencil__get_editor_state с include_schema=true чтобы получить схему .pen файла
-2. Затем вызови mcp__pencil__get_guidelines с topic подходящим для задачи (web-app, mobile-app, landing-page)
-3. Вызови mcp__pencil__get_style_guide_tags чтобы получить теги стилей
+### Шаг 1: Инициализация Pencil
+1. Вызови mcp__pencil__get_editor_state с include_schema=true
+2. Вызови mcp__pencil__get_guidelines с topic подходящим для задачи (web-app, mobile-app, landing-page)
+3. Вызови mcp__pencil__get_style_guide_tags
 4. Вызови mcp__pencil__get_style_guide с подходящими тегами
-5. Создай новый документ: mcp__pencil__open_document с filePathOrTemplate="${penFilePath}"
-6. Если open_document вернул ошибку — создай файл через mcp__pencil__open_document с filePathOrTemplate="new", а затем сохрани
-7. Создавай экраны и компоненты через mcp__pencil__batch_design
-8. Проверяй результат через mcp__pencil__get_screenshot
 
-PEN_FILE_PATH: ${penFilePath}
+### Шаг 2: Создание .pen файла
+5. Вызови mcp__pencil__open_document с filePathOrTemplate="${penFilePath}"
+   - Это создаст НОВЫЙ .pen файл по указанному пути
+   - Если вернулась ошибка — попробуй filePathOrTemplate="new"
 
-ВАЖНО: После завершения работы .pen файл будет автоматически открыт в приложении Pencil.
-Также создай wireframes.md с текстовым описанием всех экранов и user flows.
+### Шаг 3: Дизайн экранов
+6. Создавай экраны через mcp__pencil__batch_design (максимум 25 операций за вызов)
+7. После каждого экрана — проверяй через mcp__pencil__get_screenshot
+
+### Шаг 4: Документация
+8. Создай wireframes.md с текстовым описанием всех экранов и user flows
+9. Создай design_system.md с цветами, шрифтами, компонентами
+
+ПУТЬ К ФАЙЛУ: ${penFilePath}
+
+КРИТИЧНО: Файл .pen ОБЯЗАТЕЛЕН. Без него задача считается НЕВЫПОЛНЕННОЙ.
+Если MCP tools не отвечают (таймаут) — напиши об этом в output и создай wireframes.md с ASCII-макетами как fallback.
 `;
   }
 
@@ -1334,25 +1344,28 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
     const pencilExists = fs.existsSync(pencilBinPath);
 
     if (pencilExists) {
-      // Step 1: Create empty .pen file BEFORE launching agent
-      const penFilePath = path.join(PROJECTS_DIR, id, `${id}.pen`);
-      if (!fs.existsSync(penFilePath)) {
-        fs.writeFileSync(penFilePath, JSON.stringify({
-          version: "1.0",
-          id: id,
-          name: state.name || id,
-          nodes: [],
-        }, null, 2), "utf-8");
+      // Pencil MCP requires the Pencil GUI app to be running (IPC connection).
+      // Without it: "app connection is required" error, all MCP calls timeout.
+      //
+      // IMPORTANT: Do NOT use `open file.pen` — Pencil is Electron and
+      // treats file paths as URLs, showing dashboard (localhost:3000) in webview.
+      //
+      // Correct sequence:
+      // 1. Launch Pencil app (without any file argument)
+      // 2. Wait for it to initialize (3 seconds)
+      // 3. Agent uses MCP open_document to create/open .pen file programmatically
+      try {
+        // Check if Pencil is already running
+        const { execSync } = require("child_process");
+        const isRunning = execSync("pgrep -x Pencil", { encoding: "utf-8", timeout: 2000 }).trim();
+        if (!isRunning) throw new Error("not running");
+      } catch {
+        // Launch Pencil app (no file args — prevents webview URL loading)
+        try {
+          spawn("open", ["-a", "Pencil"], { detached: true, stdio: "ignore" }).unref();
+        } catch { /* not installed */ }
       }
 
-      // Step 2: Open the .pen file in Pencil app — MCP needs the app running
-      // Pencil MCP server connects to the GUI via IPC, so app must be open
-      try {
-        spawn("open", [penFilePath], { detached: true, stdio: "ignore" }).unref();
-      } catch { /* Pencil not installed — agent will use fallback wireframes.md */ }
-
-      // Step 3: Wait for Pencil to initialize before starting agent
-      // Use setTimeout to delay the actual Claude spawn
       const mcpConfig = JSON.stringify({
         mcpServers: {
           pencil: {
@@ -1361,6 +1374,7 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
           },
         },
       });
+      // Wait 3s for Pencil to fully initialize before Claude starts
       claudeCmd = `sleep 3 && cat "${tmpFile}" | claude --print --output-format json --dangerously-skip-permissions --mcp-config '${mcpConfig}'`;
     }
   }
