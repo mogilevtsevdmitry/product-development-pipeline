@@ -1346,6 +1346,38 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
+    // Parse JSON output from claude --output-format json FIRST
+    let resultText = "";
+    let usageData: import("./types").AgentUsage | null = null;
+
+    try {
+      const jsonResult = JSON.parse(stdout.trim());
+      resultText = jsonResult.result || "";
+      if (jsonResult.usage || jsonResult.total_cost_usd !== undefined) {
+        const u = jsonResult.usage || {};
+        const modelKeys = jsonResult.modelUsage ? Object.keys(jsonResult.modelUsage) : [];
+        const modelName = modelKeys[0] || undefined;
+        usageData = {
+          input_tokens: u.input_tokens || 0,
+          output_tokens: u.output_tokens || 0,
+          cache_creation_tokens: u.cache_creation_input_tokens || 0,
+          cache_read_tokens: u.cache_read_input_tokens || 0,
+          cost_usd: jsonResult.total_cost_usd || 0,
+          duration_ms: jsonResult.duration_ms || (Date.now() - startTime),
+          model: modelName,
+        };
+      }
+
+      // Save usage to a JSON file for easy access
+      if (usageData) {
+        const usageFile = path.join(outputDir, "_usage.json");
+        fs.writeFileSync(usageFile, JSON.stringify(usageData, null, 2), "utf-8");
+      }
+    } catch {
+      // Not valid JSON — use raw stdout
+      resultText = stdout.trim();
+    }
+
     // Save full execution log: prompt + output + stderr
     const logParts: string[] = [
       `# Лог выполнения: ${agentId}`,
@@ -1415,38 +1447,6 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
 
     const logFile = path.join(outputDir, "_reasoning.md");
     fs.writeFileSync(logFile, logParts.join("\n"), "utf-8");
-
-    // Parse JSON output from claude --output-format json
-    let resultText = "";
-    let usageData: import("./types").AgentUsage | null = null;
-
-    try {
-      const jsonResult = JSON.parse(stdout.trim());
-      resultText = jsonResult.result || "";
-      if (jsonResult.usage || jsonResult.total_cost_usd !== undefined) {
-        const u = jsonResult.usage || {};
-        const modelKeys = jsonResult.modelUsage ? Object.keys(jsonResult.modelUsage) : [];
-        const modelName = modelKeys[0] || undefined;
-        usageData = {
-          input_tokens: u.input_tokens || 0,
-          output_tokens: u.output_tokens || 0,
-          cache_creation_tokens: u.cache_creation_input_tokens || 0,
-          cache_read_tokens: u.cache_read_input_tokens || 0,
-          cost_usd: jsonResult.total_cost_usd || 0,
-          duration_ms: jsonResult.duration_ms || (Date.now() - startTime),
-          model: modelName,
-        };
-      }
-
-      // Save usage to a JSON file for easy access
-      if (usageData) {
-        const usageFile = path.join(outputDir, "_usage.json");
-        fs.writeFileSync(usageFile, JSON.stringify(usageData, null, 2), "utf-8");
-      }
-    } catch {
-      // Not valid JSON — use raw stdout
-      resultText = stdout.trim();
-    }
 
     if (code === 0 && resultText) {
       const outputFile = path.join(outputDir, `${agentId}-output.md`);
