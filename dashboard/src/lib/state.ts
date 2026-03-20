@@ -1241,10 +1241,9 @@ function finalizeAgent(
           if (!state.agents[agentId].artifacts.includes(relPen)) {
             state.agents[agentId].artifacts.unshift(relPen);
           }
-          // Open .pen file in Pencil app (if installed)
-          try {
-            spawn("open", ["-a", "Pencil", penFile], { detached: true, stdio: "ignore" }).unref();
-          } catch { /* Pencil not installed — ok */ }
+          // Don't auto-open Pencil — it's an Electron app that shows
+          // its own webview (may display dashboard URL instead of file).
+          // User can open .pen files manually or via dashboard "Open in Pencil" button.
         }
       }
     }
