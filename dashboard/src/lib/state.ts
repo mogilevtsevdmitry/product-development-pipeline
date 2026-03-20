@@ -1091,7 +1091,24 @@ function prepareAgentPrompt(
     // Provide the .pen file path so the agent knows where to create the design
     const penFileName = `${state.project_id}.pen`;
     const penFilePath = path.join(PROJECTS_DIR, state.project_id, penFileName);
-    agentSpecificContext = `\n\n# Pencil (.pen) файл\n\nPEN_FILE_PATH: ${penFilePath}\n\nСоздай дизайн в этом файле через mcp__pencil__open_document с filePathOrTemplate равным указанному пути.\nПосле завершения дизайна файл будет доступен пользователю в приложении Pencil.\n`;
+    agentSpecificContext = `\n\n# Создание дизайна в Pencil (.pen файл)
+
+## Обязательный порядок действий:
+
+1. Сначала вызови mcp__pencil__get_editor_state с include_schema=true чтобы получить схему .pen файла
+2. Затем вызови mcp__pencil__get_guidelines с topic подходящим для задачи (web-app, mobile-app, landing-page)
+3. Вызови mcp__pencil__get_style_guide_tags чтобы получить теги стилей
+4. Вызови mcp__pencil__get_style_guide с подходящими тегами
+5. Создай новый документ: mcp__pencil__open_document с filePathOrTemplate="${penFilePath}"
+6. Если open_document вернул ошибку — создай файл через mcp__pencil__open_document с filePathOrTemplate="new", а затем сохрани
+7. Создавай экраны и компоненты через mcp__pencil__batch_design
+8. Проверяй результат через mcp__pencil__get_screenshot
+
+PEN_FILE_PATH: ${penFilePath}
+
+ВАЖНО: После завершения работы .pen файл будет автоматически открыт в приложении Pencil.
+Также создай wireframes.md с текстовым описанием всех экранов и user flows.
+`;
   }
 
   const fullPrompt = [
@@ -1213,11 +1230,21 @@ function finalizeAgent(
 
     // UX/UI Designer: also collect .pen file from project root
     if (agentId === "ux-ui-designer") {
-      const penFile = path.join(projectDir, `${id}.pen`);
-      if (fs.existsSync(penFile)) {
-        const relPen = `${id}.pen`;
-        if (!state.agents[agentId].artifacts.includes(relPen)) {
-          state.agents[agentId].artifacts.unshift(relPen);
+      // Collect .pen files from project root and output dir
+      const penLocations = [
+        path.join(projectDir, `${id}.pen`),
+        ...fs.readdirSync(outputDir).filter(f => f.endsWith(".pen")).map(f => path.join(outputDir, f)),
+      ];
+      for (const penFile of penLocations) {
+        if (fs.existsSync(penFile)) {
+          const relPen = path.relative(projectDir, penFile);
+          if (!state.agents[agentId].artifacts.includes(relPen)) {
+            state.agents[agentId].artifacts.unshift(relPen);
+          }
+          // Open .pen file in Pencil app (if installed)
+          try {
+            spawn("open", ["-a", "Pencil", penFile], { detached: true, stdio: "ignore" }).unref();
+          } catch { /* Pencil not installed — ok */ }
         }
       }
     }
@@ -1304,21 +1331,24 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
 
   // UX/UI Designer gets access to Pencil MCP for .pen file creation
   if (agentId === "ux-ui-designer") {
-    const pencilBin = "/Applications/Pencil.app/Contents/Resources/app.asar.unpacked/out/mcp-server-darwin-arm64";
-    const mcpConfig = JSON.stringify({
-      mcpServers: {
-        pencil: {
-          command: pencilBin,
-          args: ["--app", "desktop"],
-        },
-      },
-    });
-    claudeCmd = `cat "${tmpFile}" | claude --print --output-format json --dangerously-skip-permissions --mcp-config '${mcpConfig}' --allowedTools "mcp__pencil__*"`;
+    const pencilBinPath = "/Applications/Pencil.app/Contents/Resources/app.asar.unpacked/out/mcp-server-darwin-arm64";
+    const pencilExists = fs.existsSync(pencilBinPath);
 
-    // Open Pencil app if installed (user can watch design being created live)
-    try {
-      spawn("open", ["-a", "Pencil"], { detached: true, stdio: "ignore" }).unref();
-    } catch { /* Pencil not installed — that's ok */ }
+    if (pencilExists) {
+      // Use Pencil MCP server — agent can create/edit .pen files
+      const mcpConfig = JSON.stringify({
+        mcpServers: {
+          pencil: {
+            command: pencilBinPath,
+            args: [],
+          },
+        },
+      });
+      // Allow ALL tools (not just pencil) — agent needs Bash, Write, Edit too
+      claudeCmd = `cat "${tmpFile}" | claude --print --output-format json --dangerously-skip-permissions --mcp-config '${mcpConfig}'`;
+    }
+    // Do NOT open Pencil app at agent start — it has no file to open yet.
+    // Instead, Pencil will be opened AFTER the agent creates the .pen file (in finalizeAgent).
   }
 
   const child = spawn(
