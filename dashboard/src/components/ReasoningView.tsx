@@ -35,6 +35,8 @@ export default function ReasoningView({
   const [activeSection, setActiveSection] = useState<
     "reasoning" | "prompt"
   >("reasoning");
+  // Auto-switch to prompt tab if reasoning is not available
+  const effectiveSection = (!reasoning && prompt) ? "prompt" : activeSection;
   const [error, setError] = useState<string | null>(null);
 
   const phaseKey = PHASE_MAP[phase] || phase;
@@ -143,21 +145,22 @@ export default function ReasoningView({
       </div>
 
       {/* Content */}
-      {activeSection === "reasoning" && reasoning && (
+      {effectiveSection === "reasoning" && reasoning && (
         <ReasoningContent content={reasoning} />
       )}
-      {activeSection === "reasoning" && !reasoning && (
+      {effectiveSection === "reasoning" && !reasoning && (
         <div className="rounded-xl border border-gray-800 bg-gray-900 p-6 text-center">
           <p className="text-gray-500 text-sm">
-            Лог рассуждения не найден
+            Лог рассуждения не найден.
+            {prompt && " Переключитесь на «Входные данные» чтобы увидеть промпт."}
           </p>
         </div>
       )}
 
-      {activeSection === "prompt" && prompt && (
+      {effectiveSection === "prompt" && prompt && (
         <PromptContent content={prompt} />
       )}
-      {activeSection === "prompt" && !prompt && (
+      {effectiveSection === "prompt" && !prompt && (
         <div className="rounded-xl border border-gray-800 bg-gray-900 p-6 text-center">
           <p className="text-gray-500 text-sm">
             Входной промпт не найден

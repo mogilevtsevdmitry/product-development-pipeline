@@ -102,13 +102,14 @@ export async function POST(req: NextRequest) {
   fs.mkdirSync(agentOutputDir, { recursive: true });
   fs.writeFileSync(revisionFile, JSON.stringify(history, null, 2), "utf-8");
 
-  // Mark agent as running in state
+  // Mark agent as running (revision mode) in state
   const stateFile = path.join(STATE_DIR, `${projectId}.json`);
   if (fs.existsSync(stateFile)) {
     try {
       const state = JSON.parse(fs.readFileSync(stateFile, "utf-8"));
       if (state.agents[agentId]) {
         state.agents[agentId].status = "running";
+        state.agents[agentId].started_at = new Date().toISOString(); // reset timer for auto-recovery
         state.agents[agentId].error = null;
         state.updated_at = new Date().toISOString();
         fs.writeFileSync(stateFile, JSON.stringify(state, null, 2), "utf-8");
@@ -116,12 +117,19 @@ export async function POST(req: NextRequest) {
     } catch { /* skip */ }
   }
 
-  // Collect current artifacts content
+  // Collect current artifacts content (both .md and config files)
   const artifactContents: string[] = [];
+  const INCLUDE_EXTS = [".md", ".yml", ".yaml", ".json", ".conf", ".env", ".Dockerfile", ".sh"];
   if (fs.existsSync(agentOutputDir)) {
     for (const file of fs.readdirSync(agentOutputDir)) {
-      if (file.endsWith(".md") && !file.startsWith("_")) {
-        const content = fs.readFileSync(path.join(agentOutputDir, file), "utf-8");
+      if (file.startsWith("_") || file === ".DS_Store") continue;
+      const ext = "." + file.split(".").pop();
+      const isDockerfile = file.includes("Dockerfile") || file.includes("dockerignore");
+      if (!INCLUDE_EXTS.includes(ext) && !isDockerfile) continue;
+      const fp = path.join(agentOutputDir, file);
+      const stat = fs.statSync(fp);
+      if (stat.isFile() && stat.size < 50000) {
+        const content = fs.readFileSync(fp, "utf-8");
         artifactContents.push(`--- Файл: ${file} ---\n${content}\n`);
       }
     }
@@ -142,7 +150,7 @@ export async function POST(req: NextRequest) {
     artifactContents.join("\n"),
     "\n\n# Правки от человека\n\n",
     message,
-    `\n\n# Инструкции\n\nОбнови свой отчёт с учётом правок. Верни полный обновлённый отчёт в формате Markdown. Весь твой вывод будет сохранён. Не пиши ничего лишнего — только обновлённый структурированный отчёт.`,
+    `\n\n# Инструкции\n\nВнеси правки, запрошенные человеком. Это может включать:\n- Обновление отчётов и документации\n- Запуск команд (docker, npm, etc.)\n- Создание/изменение файлов конфигурации\n- Тестирование и проверку работоспособности\n\nЕсли правки требуют выполнения команд — выполни их. Рабочая директория: ${agentOutputDir}\nПо завершении выведи краткий отчёт о том, что было сделано.`,
   ].join("");
 
   // Write to temp file
