@@ -6,6 +6,7 @@ import ArtifactViewer from "@/components/ArtifactViewer";
 import RevisionChat from "@/components/RevisionChat";
 import ReasoningView from "@/components/ReasoningView";
 import FeedbackPanel from "@/components/FeedbackPanel";
+import FeedbackReceivedBlock from "@/components/FeedbackReceivedBlock";
 import type { ProjectState, AgentStatus } from "@/lib/types";
 
 type Tab = "overview" | "reasoning";
@@ -268,11 +269,24 @@ export default function AgentDetailPage({
             <div className="rounded-xl border border-gray-800 bg-gray-900 p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-white">📊 Использование токенов</h3>
-                {runs > 1 && (
-                  <span className="text-xs px-2 py-1 rounded bg-amber-900/30 text-amber-400 border border-amber-800">
-                    {runs} {runs < 5 ? "запуска" : "запусков"} (суммарно)
-                  </span>
-                )}
+                <div className="flex items-center gap-2">
+                  {total.model && (
+                    <span className={`text-xs px-2 py-1 rounded border ${
+                      total.model.includes("opus") ? "bg-purple-900/30 text-purple-400 border-purple-800" :
+                      total.model.includes("haiku") ? "bg-green-900/30 text-green-400 border-green-800" :
+                      "bg-blue-900/30 text-blue-400 border-blue-800"
+                    }`}>
+                      {total.model.includes("opus") ? "Opus" :
+                       total.model.includes("haiku") ? "Haiku" :
+                       total.model.includes("sonnet") ? "Sonnet" : total.model}
+                    </span>
+                  )}
+                  {runs > 1 && (
+                    <span className="text-xs px-2 py-1 rounded bg-amber-900/30 text-amber-400 border border-amber-800">
+                      {runs} {runs < 5 ? "запуска" : "запусков"} (суммарно)
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
@@ -418,7 +432,7 @@ export default function AgentDetailPage({
             <p className="text-gray-500 text-sm">Нет артефактов</p>
           ) : (
             <div className="space-y-2">
-              {agent.artifacts.map((artifactPath, i) => {
+              {agent.artifacts.filter((p) => !p.includes("node_modules") && !p.includes(".next/") && !p.includes("__pycache__")).map((artifactPath, i) => {
                 const fileName = artifactPath.split("/").pop() || artifactPath;
                 const isOpen = openArtifact === artifactPath;
                 return (
@@ -483,50 +497,46 @@ export default function AgentDetailPage({
 
         {/* Received feedback — show on developers */}
         {agent.feedback_received && agent.feedback_received.length > 0 && (
-          <div className="rounded-xl border border-red-800/50 bg-red-900/10 p-6">
-            <h3 className="font-semibold text-red-400 mb-4">
-              ⚠️ Полученные замечания ({agent.feedback_received.filter(f => !f.resolved).length} нерешённых)
-            </h3>
-            <div className="space-y-3">
-              {agent.feedback_received.map((fb, i) => {
-                const sevColors: Record<string, string> = {
-                  critical: "border-red-600 bg-red-900/20",
-                  high: "border-orange-600 bg-orange-900/20",
-                  medium: "border-yellow-600 bg-yellow-900/20",
-                  low: "border-green-600 bg-green-900/20",
-                };
-                const sevLabels: Record<string, string> = {
-                  critical: "🔴 CRITICAL",
-                  high: "🟠 HIGH",
-                  medium: "🟡 MEDIUM",
-                  low: "🟢 LOW",
-                };
-                return (
-                  <div
-                    key={i}
-                    className={`rounded-lg border p-4 ${sevColors[fb.severity] || "border-gray-700"} ${fb.resolved ? "opacity-50" : ""}`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium">
-                        {sevLabels[fb.severity]} — от {AGENT_LABELS[fb.from_agent] || fb.from_agent}
-                      </span>
-                      {fb.resolved && (
-                        <span className="text-xs text-green-400 bg-green-900/30 px-2 py-1 rounded">✓ Исправлено</span>
-                      )}
-                    </div>
-                    <p className="text-sm text-gray-300 whitespace-pre-wrap">{fb.description}</p>
-                    <div className="text-xs text-gray-500 mt-2">
-                      {new Date(fb.created_at).toLocaleString("ru-RU")}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+          <FeedbackReceivedBlock
+            feedback={agent.feedback_received}
+            agentLabels={AGENT_LABELS}
+          />
+        )}
+
+        {/* Start fixing feedback button — for agents returned to pending with unresolved feedback */}
+        {agent.status === "pending" && agent.feedback_received?.some(f => !f.resolved) && (
+          <div className="rounded-xl border border-yellow-800/50 bg-yellow-900/10 p-6">
+            <h3 className="font-semibold text-yellow-400 mb-2">🔧 Требуется исправление замечаний</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              Агент получил замечания и ожидает запуска для их исправления.
+              Нажмите кнопку, чтобы запустить агента — он автоматически получит все нерешённые замечания.
+            </p>
+            <button
+              onClick={async () => {
+                try {
+                  const res = await fetch(`/api/state/${state.project_id}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: "run_agent", agentId: agentKey }),
+                  });
+                  if (!res.ok) {
+                    const data = await res.json();
+                    alert(data.error || "Ошибка запуска");
+                  }
+                } catch (e) {
+                  alert("Ошибка запуска агента");
+                }
+              }}
+              className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded-lg font-medium transition-colors"
+            >
+              ▶ Запустить исправление замечаний
+            </button>
           </div>
         )}
 
-        {/* Revision Chat */}
-        {agent.status === "completed" || agent.status === "running" || agent.status === "failed" ? (
+        {/* Revision Chat — show for completed/running/failed, or pending with feedback */}
+        {(agent.status === "completed" || agent.status === "running" || agent.status === "failed" ||
+          (agent.status === "pending" && agent.feedback_received?.some(f => !f.resolved))) ? (
           <RevisionChat
             projectId={state.project_id}
             agentId={agentKey}

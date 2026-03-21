@@ -1014,7 +1014,10 @@ function collectInputContext(
       parts.push(`\n## ${severityEmoji} — от ${fb.from_agent}`);
       parts.push(`${fb.description}\n`);
     }
-    parts.push(`\nПосле исправления каждой проблемы укажи в отчёте что именно было исправлено.\n`);
+    parts.push(`\nПосле исправления каждой проблемы ОБЯЗАТЕЛЬНО укажи в отчёте:\n`);
+    parts.push(`1. Какое именно замечание исправлено (процитируй кратко)\n`);
+    parts.push(`2. Что конкретно было сделано\n`);
+    parts.push(`3. Формат: "✅ [замечание] — [что сделано]"\n`);
   }
 
   return parts.join("\n");
@@ -1083,6 +1086,23 @@ function prepareAgentPrompt(
   try { systemPrompt = fs.readFileSync(path.join(agentDir, "system-prompt.md"), "utf-8"); } catch { /* */ }
   try { rules = fs.readFileSync(path.join(agentDir, "rules.md"), "utf-8"); } catch { /* */ }
 
+  // Load skills: shared (for all agents) + agent-specific
+  let skillsContent = "";
+  const sharedSkillsDir = path.join(AGENTS_DIR, "shared", "skills");
+  const agentSkillsDir = path.join(agentDir, "skills");
+  for (const skillDir of [sharedSkillsDir, agentSkillsDir]) {
+    try {
+      if (fs.existsSync(skillDir)) {
+        for (const file of fs.readdirSync(skillDir)) {
+          if (file.endsWith(".md")) {
+            const content = fs.readFileSync(path.join(skillDir, file), "utf-8");
+            skillsContent += `\n\n---\n${content}`;
+          }
+        }
+      }
+    } catch { /* */ }
+  }
+
   const context = collectInputContext(agentId, state);
 
   // Agent-specific additions
@@ -1124,6 +1144,7 @@ function prepareAgentPrompt(
   const fullPrompt = [
     systemPrompt,
     rules ? `\n\n# Правила\n\n${rules}` : "",
+    skillsContent ? `\n\n# Навыки и знания\n${skillsContent}` : "",
     agentSpecificContext,
     context ? `\n\n# Входные данные\n\n${context}` : "",
     `\n\n# Инструкции\n\nВыполни задачу и верни результат в формате Markdown. Весь твой вывод будет сохранён как артефакт. Не пиши ничего лишнего — только структурированный отчёт.`,
@@ -1132,6 +1153,87 @@ function prepareAgentPrompt(
   const tmpFile = path.join(os.tmpdir(), `agent-prompt-${agentId}-${Date.now()}.md`);
   fs.writeFileSync(tmpFile, fullPrompt, "utf-8");
   return tmpFile;
+}
+
+// --- Model Selection ---
+
+type ModelTier = "opus" | "sonnet" | "haiku";
+
+/** Default model per agent based on task complexity */
+const DEFAULT_MODEL: Record<string, ModelTier> = {
+  // Opus — complex analytical, architectural, security, legal
+  "system-architect": "opus",
+  "security-engineer": "opus",
+  "legal-compliance": "opus",
+  "pipeline-architect": "opus",
+
+  // Sonnet — standard development, analysis, strategy
+  "problem-researcher": "sonnet",
+  "market-researcher": "sonnet",
+  "product-owner": "sonnet",
+  "business-analyst": "sonnet",
+  "ux-ui-designer": "sonnet",
+  "tech-lead": "sonnet",
+  "backend-developer": "sonnet",
+  "frontend-developer": "sonnet",
+  "devops-engineer": "sonnet",
+  "qa-engineer": "sonnet",
+  "release-manager": "sonnet",
+  "product-marketer": "sonnet",
+  "data-analyst": "sonnet",
+  "orchestrator": "sonnet",
+
+  // Haiku — simple content, templates, formatting
+  "smm-manager": "haiku",
+  "content-creator": "haiku",
+  "customer-support": "haiku",
+};
+
+/**
+ * Dynamically classify prompt complexity using a quick Haiku call.
+ * Falls back to static DEFAULT_MODEL on failure.
+ */
+function selectModel(agentId: string, promptContent: string): ModelTier {
+  const defaultModel = DEFAULT_MODEL[agentId] || "sonnet";
+
+  try {
+    // Take first 2000 chars of the prompt for classification (enough context, fast)
+    const promptSample = promptContent.slice(0, 2000);
+
+    const classificationPrompt = `Ты — классификатор сложности задач. Проанализируй задачу ниже и определи уровень сложности.
+
+Ответь ОДНИМ СЛОВОМ:
+- opus — если задача требует глубокого аналитического мышления, архитектурных решений, анализа безопасности, юридического анализа, или принятия решений с множеством trade-off
+- sonnet — если задача стандартной сложности: написание кода, генерация документации, тестирование, настройка инфраструктуры
+- haiku — если задача простая: форматирование, шаблоны, короткие тексты, FAQ, простые конфиги
+
+Агент: ${agentId}
+Дефолтная модель: ${defaultModel}
+
+Задача:
+${promptSample}
+
+Ответь ТОЛЬКО одним словом: opus, sonnet или haiku`;
+
+    const { execSync } = require("child_process");
+    const result = execSync(
+      `echo ${JSON.stringify(classificationPrompt)} | claude --print --model haiku --no-input 2>/dev/null`,
+      { encoding: "utf-8", timeout: 15000 }
+    ).trim().toLowerCase();
+
+    // Parse response — extract model name
+    if (result.includes("opus")) return "opus";
+    if (result.includes("haiku")) return "haiku";
+    if (result.includes("sonnet")) return "sonnet";
+
+    // If Haiku returned something unexpected, use default
+    console.log(`[ModelSelector] ${agentId}: Haiku returned "${result}", using default "${defaultModel}"`);
+    return defaultModel;
+  } catch (err) {
+    // Classification failed — use static default
+    console.log(`[ModelSelector] ${agentId}: classification failed, using default "${defaultModel}"`);
+    return defaultModel;
+  }
 }
 
 /**
@@ -1262,6 +1364,29 @@ function finalizeAgent(
     if (agentId === "pipeline-architect") {
       expandPipelineFromArchitect(state, id);
     }
+
+    // Mark all received feedback as resolved when agent completes successfully
+    if (state.agents[agentId].feedback_received?.length) {
+      const now = new Date().toISOString();
+      for (const fb of state.agents[agentId].feedback_received!) {
+        if (!fb.resolved) {
+          fb.resolved = true;
+          fb.resolved_at = now;
+        }
+      }
+      // Also mark in the sender's feedback_sent
+      for (const fb of state.agents[agentId].feedback_received!) {
+        const sender = state.agents[fb.from_agent];
+        if (sender?.feedback_sent) {
+          for (const sfb of sender.feedback_sent) {
+            if (sfb.to_agent === agentId && sfb.description === fb.description && !sfb.resolved) {
+              sfb.resolved = true;
+              sfb.resolved_at = now;
+            }
+          }
+        }
+      }
+    }
   } else {
     state.agents[agentId].status = "failed";
     state.agents[agentId].error = errorMsg || "Неизвестная ошибка";
@@ -1335,8 +1460,16 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
 
   const startTime = Date.now();
 
+  // Select optimal model based on task complexity
+  const selectedModel = selectModel(agentId, promptContent);
+  console.log(`[ModelSelector] ${agentId}: selected model "${selectedModel}"`);
+
+  // Save model selection info
+  const modelLogFile = path.join(outputDir, "_model.txt");
+  fs.writeFileSync(modelLogFile, `model: ${selectedModel}\nagent: ${agentId}\ndefault: ${DEFAULT_MODEL[agentId] || "sonnet"}\ntimestamp: ${new Date().toISOString()}\n`, "utf-8");
+
   // Build Claude CLI command with agent-specific MCP tools
-  let claudeCmd = `cat "${tmpFile}" | claude --print --output-format json --dangerously-skip-permissions`;
+  let claudeCmd = `cat "${tmpFile}" | claude --print --output-format json --model ${selectedModel} --dangerously-skip-permissions`;
 
   // UX/UI Designer gets access to Pencil MCP for .pen file creation
   if (agentId === "ux-ui-designer") {
@@ -1375,7 +1508,7 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
         },
       });
       // Wait 3s for Pencil to fully initialize before Claude starts
-      claudeCmd = `sleep 3 && cat "${tmpFile}" | claude --print --output-format json --dangerously-skip-permissions --mcp-config '${mcpConfig}'`;
+      claudeCmd = `sleep 3 && cat "${tmpFile}" | claude --print --output-format json --model ${selectedModel} --dangerously-skip-permissions --mcp-config '${mcpConfig}'`;
     }
   }
 

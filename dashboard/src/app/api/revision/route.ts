@@ -56,6 +56,48 @@ const AGENT_PHASES: Record<string, string> = {
   orchestrator: "meta",
 };
 
+type ModelTier = "opus" | "sonnet" | "haiku";
+
+/** Quick model selection for revision chat — no API call, heuristic-based */
+function selectRevisionModel(agentId: string, message: string): ModelTier {
+  const msg = message.toLowerCase();
+
+  // Complex analytical agents always get at least sonnet
+  const complexAgents = new Set(["system-architect", "security-engineer", "legal-compliance", "pipeline-architect"]);
+
+  // Simple agents default to haiku for chat
+  const simpleAgents = new Set(["smm-manager", "content-creator", "customer-support"]);
+
+  // Keywords that indicate complex task → upgrade
+  const complexKeywords = [
+    "архитектур", "безопасност", "уязвимост", "рефакторинг", "оптимизац",
+    "перепиши", "переделай", "проанализируй", "trade-off", "сравни",
+    "почему", "объясни подробно", "разбери детально",
+  ];
+
+  // Keywords for simple task → downgrade
+  const simpleKeywords = [
+    "исправь опечатку", "переименуй", "добавь комментарий", "формат",
+    "ок", "да", "хорошо", "принято",
+  ];
+
+  // Check for complex keywords
+  const isComplex = complexKeywords.some(kw => msg.includes(kw));
+  const isSimple = simpleKeywords.some(kw => msg.includes(kw)) || msg.length < 30;
+
+  if (complexAgents.has(agentId)) {
+    return isSimple ? "sonnet" : "opus";
+  }
+  if (simpleAgents.has(agentId)) {
+    return isComplex ? "sonnet" : "haiku";
+  }
+
+  // Standard agents
+  if (isComplex) return "opus";
+  if (isSimple) return "haiku";
+  return "sonnet";
+}
+
 interface RevisionEntry {
   role: "human" | "agent";
   message: string;
@@ -161,6 +203,7 @@ export async function POST(req: NextRequest) {
 - Попросить запустить что-то → выполни команду
 
 ВАЖНО:
+- Отвечай ВСЕГДА на русском языке (кроме кода и технических терминов)
 - НЕ повторяй весь отчёт в ответе
 - НЕ пиши "артефакты обновлены" если ничего не менял
 - Отвечай КРАТКО — 3-10 предложений для вопросов, подробнее для задач
@@ -174,6 +217,9 @@ export async function POST(req: NextRequest) {
     `\n\n# Рабочая директория: ${agentOutputDir}`,
   ].join("");
 
+  // Select model for revision chat based on message complexity
+  const revisionModel = selectRevisionModel(agentId, message);
+
   // Write to temp file
   const tmpFile = path.join(os.tmpdir(), `revision-${agentId}-${Date.now()}.md`);
   fs.writeFileSync(tmpFile, revisionPrompt, "utf-8");
@@ -181,7 +227,7 @@ export async function POST(req: NextRequest) {
   // Spawn Claude in background
   const child = spawn(
     "/bin/sh",
-    ["-c", `cat "${tmpFile}" | claude --print --dangerously-skip-permissions`],
+    ["-c", `cat "${tmpFile}" | claude --print --model ${revisionModel} --dangerously-skip-permissions`],
     {
       cwd: agentOutputDir,
       stdio: ["ignore", "pipe", "pipe"],
@@ -244,9 +290,11 @@ export async function POST(req: NextRequest) {
           // Re-collect artifacts
           const artifacts: string[] = [];
           const projectDir = path.join(PROJECTS_DIR, projectId);
+          const SKIP_DIRS = new Set(["node_modules", ".next", ".git", "__pycache__", ".venv", "venv", "dist", "build", ".cache", ".turbo"]);
           function walk(dir: string) {
             if (!fs.existsSync(dir)) return;
             for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+              if (SKIP_DIRS.has(e.name)) continue;
               const full = path.join(dir, e.name);
               if (e.isDirectory()) walk(full);
               else if (e.name.endsWith(".md") && !e.name.startsWith("_")) {
@@ -256,6 +304,30 @@ export async function POST(req: NextRequest) {
           }
           walk(agentOutputDir);
           state.agents[agentId].artifacts = artifacts;
+
+          // Mark feedback as resolved after successful revision
+          if (code === 0 && state.agents[agentId].feedback_received?.length) {
+            const now = new Date().toISOString();
+            for (const fb of state.agents[agentId].feedback_received) {
+              if (!fb.resolved) {
+                fb.resolved = true;
+                fb.resolved_at = now;
+              }
+            }
+            // Also mark in the sender's feedback_sent
+            for (const fb of state.agents[agentId].feedback_received) {
+              const sender = state.agents[fb.from_agent];
+              if (sender?.feedback_sent) {
+                for (const sfb of sender.feedback_sent) {
+                  if (sfb.to_agent === agentId && sfb.description === fb.description && !sfb.resolved) {
+                    sfb.resolved = true;
+                    sfb.resolved_at = now;
+                  }
+                }
+              }
+            }
+          }
+
           state.updated_at = new Date().toISOString();
           fs.writeFileSync(stateFile, JSON.stringify(state, null, 2), "utf-8");
         }
