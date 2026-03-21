@@ -103,6 +103,7 @@ export interface ProjectState {
   project_id: string;
   name: string;
   description: string;
+  project_path?: string;          // абсолютный путь к внешнему проекту (опционально)
   created_at: string;
   updated_at: string;
   mode: PipelineMode;

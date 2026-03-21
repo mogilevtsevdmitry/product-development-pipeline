@@ -8,6 +8,11 @@ const PROJECTS_DIR = path.resolve(process.cwd(), "..", "projects");
 const AGENTS_DIR = path.resolve(process.cwd(), "..", "agents");
 const STATE_DIR = path.resolve(process.cwd(), "..", "orchestrator", "state");
 
+/** Agents that write code to external project directory */
+const CODE_AGENTS = new Set([
+  "backend-developer", "frontend-developer", "devops-engineer", "qa-engineer",
+]);
+
 const AGENT_DIRS: Record<string, string> = {
   "problem-researcher": "research/problem-researcher",
   "market-researcher": "research/market-researcher",
@@ -224,12 +229,23 @@ export async function POST(req: NextRequest) {
   const tmpFile = path.join(os.tmpdir(), `revision-${agentId}-${Date.now()}.md`);
   fs.writeFileSync(tmpFile, revisionPrompt, "utf-8");
 
+  // Determine working directory: code agents use external project path when set
+  let revisionCwd = agentOutputDir;
+  if (CODE_AGENTS.has(agentId) && fs.existsSync(stateFile)) {
+    try {
+      const st = JSON.parse(fs.readFileSync(stateFile, "utf-8"));
+      if (st.project_path && fs.existsSync(st.project_path)) {
+        revisionCwd = st.project_path;
+      }
+    } catch { /* use default */ }
+  }
+
   // Spawn Claude in background
   const child = spawn(
     "/bin/sh",
     ["-c", `cat "${tmpFile}" | claude --print --model ${revisionModel} --dangerously-skip-permissions`],
     {
-      cwd: agentOutputDir,
+      cwd: revisionCwd,
       stdio: ["ignore", "pipe", "pipe"],
     }
   );

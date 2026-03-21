@@ -9,6 +9,7 @@ interface ProjectSummary {
   project_id: string;
   name: string;
   description: string;
+  project_path?: string;
   status: string;
   mode: string;
   created_at: string;
@@ -29,6 +30,7 @@ export default function HomePage() {
   const [formName, setFormName] = useState("");
   const [formDesc, setFormDesc] = useState("");
   const [formMode, setFormMode] = useState<"auto" | "human_approval">("auto");
+  const [formProjectPath, setFormProjectPath] = useState("");
 
   async function loadProjects() {
     try {
@@ -60,6 +62,7 @@ export default function HomePage() {
           name: formName,
           description: formDesc,
           mode: formMode,
+          project_path: formProjectPath || undefined,
         }),
       });
 
@@ -69,6 +72,7 @@ export default function HomePage() {
         setFormName("");
         setFormDesc("");
         setFormMode("auto");
+        setFormProjectPath("");
         router.push(`/project/${state.project_id}`);
       } else {
         const err = await res.json();
@@ -133,7 +137,10 @@ export default function HomePage() {
               <MarkdownEditor
                 value={formDesc}
                 onChange={setFormDesc}
-                placeholder="Опишите идею продукта, целевую аудиторию, проблему...&#10;&#10;Поддерживает **Markdown**: заголовки, списки, код.&#10;Перетащите или вставьте изображение (Ctrl+V)."
+                placeholder={formProjectPath
+                  ? "Опишите текущее состояние проекта и что нужно сделать:\n\n• Какие задачи выполнить? (тестирование, безопасность, маркетинг...)\n• Что НЕ нужно? (исследование, разработка...)\n• Готовность проекта? (MVP, прототип, готовый продукт)\n\nНенужных агентов можно удалить из пайплайна после создания."
+                  : "Опишите идею продукта, целевую аудиторию, проблему...\n\nПоддерживает **Markdown**: заголовки, списки, код.\nПеретащите или вставьте изображение (Ctrl+V)."
+                }
                 minRows={6}
               />
             </div>
@@ -173,6 +180,55 @@ export default function HomePage() {
                   </div>
                 </button>
               </div>
+            </div>
+
+            {/* Путь к проекту */}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Путь к проекту <span className="text-gray-500">(опционально)</span>
+              </label>
+              <div className="flex gap-2">
+                <div className={`flex-1 px-3 py-2 bg-gray-800 border rounded-lg font-mono text-sm min-h-[38px] flex items-center ${
+                  formProjectPath ? "border-blue-500/50 text-white" : "border-gray-700 text-gray-500"
+                }`}>
+                  {formProjectPath ? (
+                    <span className="truncate" title={formProjectPath}>📁 {formProjectPath}</span>
+                  ) : (
+                    <span>Не выбрано</span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const res = await fetch("/api/pick-folder", { method: "POST" });
+                      const data = await res.json();
+                      if (data.path) {
+                        setFormProjectPath(data.path);
+                      }
+                    } catch {
+                      alert("Не удалось открыть выбор папки");
+                    }
+                  }}
+                  className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-sm transition-colors whitespace-nowrap"
+                >
+                  📂 Выбрать
+                </button>
+                {formProjectPath && (
+                  <button
+                    type="button"
+                    onClick={() => setFormProjectPath("")}
+                    className="px-2 py-2 text-gray-500 hover:text-red-400 transition-colors"
+                    title="Очистить"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                Внешняя директория для кода. Разработчики будут писать код в этой папке.
+                Если не указан — код создаётся внутри пайплайна.
+              </p>
             </div>
           </div>
 

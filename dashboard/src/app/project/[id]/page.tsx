@@ -494,6 +494,14 @@ export default function ProjectPage({
               <dt className="text-gray-500">Версия схемы</dt>
               <dd className="text-gray-300 font-mono">{state.schema_version}</dd>
             </div>
+            {state.project_path && (
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Проект</dt>
+                <dd className="text-gray-300 font-mono text-xs truncate max-w-[300px]" title={state.project_path}>
+                  📁 {state.project_path}
+                </dd>
+              </div>
+            )}
           </dl>
         </div>
 

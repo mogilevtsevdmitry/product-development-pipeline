@@ -43,8 +43,10 @@ export async function GET() {
 
   const config = readConfig();
 
+  // Skip non-phase directories (shared contains global skills, not agents)
+  const SKIP_DIRS = new Set(["shared", "node_modules", ".git"]);
   const phases = fs.readdirSync(AGENTS_DIR, { withFileTypes: true })
-    .filter(d => d.isDirectory());
+    .filter(d => d.isDirectory() && !SKIP_DIRS.has(d.name));
 
   for (const phase of phases) {
     const phaseDir = path.join(AGENTS_DIR, phase.name);
@@ -123,6 +125,12 @@ export async function POST(req: NextRequest) {
     }
 
     const agentPath = path.resolve(process.cwd(), "..", config[agentId].path);
+
+    // Validate path is within agents directory (prevent path traversal)
+    const agentsBase = path.normalize(AGENTS_DIR);
+    if (!path.normalize(agentPath).startsWith(agentsBase + path.sep)) {
+      return NextResponse.json({ error: "Недопустимый путь агента" }, { status: 400 });
+    }
 
     // Remove from config
     delete config[agentId];

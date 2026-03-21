@@ -150,6 +150,7 @@ export interface ProjectSummary {
   project_id: string;
   name: string;
   description: string;
+  project_path?: string;
   status: string;
   mode: string;
   created_at: string;
@@ -158,6 +159,14 @@ export interface ProjectSummary {
   agents_total: number;
   agents_completed: number;
 }
+
+/** Agents that write code/configs to the external project directory (when project_path is set) */
+const CODE_AGENTS = new Set([
+  "backend-developer",
+  "frontend-developer",
+  "devops-engineer",
+  "qa-engineer",
+]);
 
 export function listProjects(): ProjectSummary[] {
   ensureDir(STATE_DIR);
@@ -173,6 +182,7 @@ export function listProjects(): ProjectSummary[] {
         project_id: state.project_id,
         name: state.name,
         description: state.description || "",
+        project_path: state.project_path,
         status: state.status,
         mode: state.mode,
         created_at: state.created_at,
@@ -214,7 +224,8 @@ const STATIC_CHAIN = [
 export function createProject(
   name: string,
   description: string,
-  mode: "auto" | "human_approval" = "auto"
+  mode: "auto" | "human_approval" = "auto",
+  projectPath?: string
 ): ProjectState {
   ensureDir(STATE_DIR);
   ensureDir(PROJECTS_DIR);
@@ -222,9 +233,18 @@ export function createProject(
   const projectId = slugify(name);
   const timestamp = new Date().toISOString();
 
-  // Создаём папку проекта
+  // Создаём папку проекта (внутреннюю — для отчётов и state)
   const projectDir = path.join(PROJECTS_DIR, projectId);
   ensureDir(projectDir);
+
+  // Validate and resolve external project path
+  let resolvedProjectPath: string | undefined;
+  if (projectPath && projectPath.trim()) {
+    resolvedProjectPath = path.resolve(projectPath.trim());
+    if (!fs.existsSync(resolvedProjectPath)) {
+      fs.mkdirSync(resolvedProjectPath, { recursive: true });
+    }
+  }
 
   // Начальное состояние — только статическая цепочка
   const agentsState: Record<string, { status: string; started_at: null; completed_at: null; artifacts: string[]; error: null }> = {};
@@ -242,6 +262,7 @@ export function createProject(
     project_id: projectId,
     name,
     description,
+    ...(resolvedProjectPath ? { project_path: resolvedProjectPath } : {}),
     created_at: timestamp,
     updated_at: timestamp,
     mode,
@@ -986,12 +1007,16 @@ function collectInputContext(
   }
 
   // Add project file tree for agents that need code context
-  const codeAgents = new Set([
+  const codeContextAgents = new Set([
+    "backend-developer", "frontend-developer",
     "devops-engineer", "qa-engineer", "security-engineer",
-    "release-manager",
+    "release-manager", "tech-lead",
   ]);
-  if (codeAgents.has(agentId)) {
-    const tree = getProjectTree(state.project_id);
+  if (codeContextAgents.has(agentId)) {
+    // Use external project tree if available, otherwise internal
+    const tree = state.project_path
+      ? getProjectTreeFromPath(state.project_path)
+      : getProjectTree(state.project_id);
     if (tree) {
       parts.push(`\n--- Структура проекта ---\n${tree}\n`);
     }
@@ -1026,9 +1051,8 @@ function collectInputContext(
 /**
  * Get a compact file tree of the project (excluding node_modules etc).
  */
-function getProjectTree(projectId: string, maxDepth = 4): string {
-  const projectDir = path.join(PROJECTS_DIR, projectId);
-  if (!fs.existsSync(projectDir)) return "";
+function getProjectTreeFromPath(dirPath: string, maxDepth = 4): string {
+  if (!fs.existsSync(dirPath)) return "";
 
   const lines: string[] = [];
   function walk(dir: string, prefix: string, depth: number) {
@@ -1068,8 +1092,13 @@ function getProjectTree(projectId: string, maxDepth = 4): string {
     }
   }
 
-  walk(projectDir, "", 0);
+  walk(dirPath, "", 0);
   return lines.join("\n");
+}
+
+function getProjectTree(projectId: string, maxDepth = 4): string {
+  const projectDir = path.join(PROJECTS_DIR, projectId);
+  return getProjectTreeFromPath(projectDir, maxDepth);
 }
 
 /**
@@ -1139,6 +1168,34 @@ function prepareAgentPrompt(
 КРИТИЧНО: Файл .pen ОБЯЗАТЕЛЕН. Без него задача считается НЕВЫПОЛНЕННОЙ.
 Если MCP tools не отвечают (таймаут) — напиши об этом в output и создай wireframes.md с ASCII-макетами как fallback.
 `;
+  }
+
+  // External project directory instructions
+  if (state.project_path && CODE_AGENTS.has(agentId)) {
+    agentSpecificContext += `\n\n# Рабочая директория проекта
+
+ВАЖНО: Ты работаешь в ВНЕШНЕЙ директории проекта:
+**${state.project_path}**
+
+Весь код (исходники, конфиги, тесты, docker-файлы) пиши В ТЕКУЩЕЙ ДИРЕКТОРИИ.
+Отчёт в формате Markdown выводи как обычно — через stdout.
+
+Если в директории уже есть код — это существующий проект. Изучи его структуру перед началом работы.
+НЕ создавай проект заново, если он уже существует. Работай с тем, что есть.
+`;
+  } else if (state.project_path && !CODE_AGENTS.has(agentId)) {
+    // Non-code agents that reference code (architect, tech-lead, security, etc.)
+    const codeRefAgents = new Set([
+      "system-architect", "tech-lead", "security-engineer",
+      "release-manager", "qa-engineer",
+    ]);
+    if (codeRefAgents.has(agentId)) {
+      agentSpecificContext += `\n\n# Путь к проекту (только для справки)
+
+Код проекта находится в: **${state.project_path}**
+Ты пишешь ТОЛЬКО отчёт/документацию. Код не пиши — это задача разработчиков.
+`;
+    }
   }
 
   const fullPrompt = [
@@ -1512,11 +1569,21 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
     }
   }
 
+  // Code agents use external project_path as working directory (when set)
+  let agentCwd = outputDir;
+  if (state.project_path && CODE_AGENTS.has(agentId)) {
+    if (fs.existsSync(state.project_path)) {
+      agentCwd = state.project_path;
+    } else {
+      console.warn(`[spawnAgent] project_path "${state.project_path}" не существует, используем outputDir`);
+    }
+  }
+
   const child = spawn(
     "/bin/sh",
     ["-c", claudeCmd],
     {
-      cwd: outputDir,
+      cwd: agentCwd,
       stdio: ["ignore", "pipe", "pipe"],
       detached: false,
     }
@@ -1838,6 +1905,66 @@ export function runSpecificAgent(id: string, agentId: string): {
   fs.writeFileSync(fp, JSON.stringify(state, null, 2), "utf-8");
 
   spawnAgent(id, agentId, state);
+  return { ok: true };
+}
+
+// ============================================================================
+// Удаление агента из pipeline (с автоматическим соединением разрывов)
+// ============================================================================
+
+export function removeAgentFromPipeline(id: string, agentId: string): {
+  ok: boolean;
+  error?: string;
+} {
+  const state = getProjectState(id);
+  if (!state) return { ok: false, error: "Проект не найден" };
+  if (!state.agents[agentId]) return { ok: false, error: "Агент не найден" };
+
+  // Don't remove running agents
+  if (state.agents[agentId].status === "running") {
+    return { ok: false, error: "Нельзя удалить работающего агента" };
+  }
+
+  // Find all edges involving this agent
+  const incomingEdges = state.pipeline_graph.edges.filter(([, to]) => to === agentId);
+  const outgoingEdges = state.pipeline_graph.edges.filter(([from]) => from === agentId);
+
+  // Get predecessor and successor nodes
+  const predecessors = incomingEdges.map(([from]) => from);
+  const successors = outgoingEdges.map(([, to]) => to);
+
+  // Remove all edges involving this agent
+  state.pipeline_graph.edges = state.pipeline_graph.edges.filter(
+    ([from, to]) => from !== agentId && to !== agentId
+  );
+
+  // Connect predecessors to successors (bridge the gap)
+  for (const pred of predecessors) {
+    for (const succ of successors) {
+      // Avoid duplicate edges
+      const exists = state.pipeline_graph.edges.some(
+        ([f, t]) => f === pred && t === succ
+      );
+      if (!exists) {
+        state.pipeline_graph.edges.push([pred, succ]);
+      }
+    }
+  }
+
+  // Remove from nodes list
+  state.pipeline_graph.nodes = state.pipeline_graph.nodes.filter(n => n !== agentId);
+
+  // Remove from parallel groups
+  state.pipeline_graph.parallel_groups = state.pipeline_graph.parallel_groups
+    .map(group => group.filter(n => n !== agentId))
+    .filter(group => group.length > 0);
+
+  // Remove agent state
+  delete state.agents[agentId];
+
+  state.updated_at = new Date().toISOString();
+  saveProjectState(id, state);
+
   return { ok: true };
 }
 

@@ -13,6 +13,7 @@ import {
   reactivateToGate,
   pauseAgent,
   runSpecificAgent,
+  removeAgentFromPipeline,
 } from "@/lib/state";
 import type { GateType, GateDecisionValue, PipelineMode } from "@/lib/types";
 
@@ -96,6 +97,11 @@ export async function POST(
 
   if (body.action === "run_agent" && body.agentId) {
     const result = runSpecificAgent(id, body.agentId);
+    return NextResponse.json(result, { status: result.ok ? 200 : 400 });
+  }
+
+  if (body.action === "remove_agent" && body.agentId) {
+    const result = removeAgentFromPipeline(id, body.agentId);
     return NextResponse.json(result, { status: result.ok ? 200 : 400 });
   }
 

@@ -101,6 +101,20 @@ function AgentNodeComponent({ id, data }: NodeProps) {
               🔄
             </button>
           )}
+          {status !== "running" && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (confirm(`Удалить агента из пайплайна? Соседние агенты будут соединены автоматически.`)) {
+                  sendAction("remove_agent");
+                }
+              }}
+              className="p-1 rounded hover:bg-red-500/20 text-red-400 text-xs"
+              title="Удалить из пайплайна"
+            >
+              ✕
+            </button>
+          )}
         </div>
         </div>
       )}
