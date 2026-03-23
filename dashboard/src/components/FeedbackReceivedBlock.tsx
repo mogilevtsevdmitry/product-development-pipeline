@@ -81,13 +81,44 @@ function FeedbackItemCard({
 export default function FeedbackReceivedBlock({
   feedback,
   agentLabels,
+  agentStatus,
+  projectId,
+  agentId,
+  onAgentStarted,
 }: {
   feedback: FeedbackItem[];
   agentLabels: Record<string, string>;
+  agentStatus?: string;
+  projectId?: string;
+  agentId?: string;
+  onAgentStarted?: () => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [starting, setStarting] = useState(false);
   const allResolved = feedback.every((f) => f.resolved);
   const unresolvedCount = feedback.filter((f) => !f.resolved).length;
+
+  async function handleStartFixing() {
+    if (!projectId || !agentId) return;
+    setStarting(true);
+    try {
+      const res = await fetch(`/api/state/${projectId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "run_agent", agentId }),
+      });
+      if (res.ok) {
+        onAgentStarted?.();
+      } else {
+        const data = await res.json();
+        alert(data.error || "Ошибка запуска агента");
+      }
+    } catch {
+      alert("Ошибка сети");
+    } finally {
+      setStarting(false);
+    }
+  }
 
   return (
     <div
@@ -97,35 +128,48 @@ export default function FeedbackReceivedBlock({
           : "border-red-800/50 bg-red-900/10"
       }`}
     >
-      <button
-        onClick={() => setCollapsed(!collapsed)}
-        className="w-full flex items-center justify-between"
-      >
-        <h3
-          className={`font-semibold ${
-            allResolved ? "text-green-400" : "text-red-400"
-          }`}
+      <div className="flex items-center justify-between">
+        <button
+          onClick={() => setCollapsed(!collapsed)}
+          className="flex items-center gap-2 flex-1"
         >
-          {allResolved
-            ? `✅ Все замечания исправлены (${feedback.length})`
-            : `⚠️ Полученные замечания (${unresolvedCount} нерешённых из ${feedback.length})`}
-        </h3>
-        <svg
-          className={`w-5 h-5 transition-transform ${
-            allResolved ? "text-green-400" : "text-red-400"
-          } ${collapsed ? "" : "rotate-180"}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M19 9l-7 7-7-7"
-          />
-        </svg>
-      </button>
+          <h3
+            className={`font-semibold ${
+              allResolved ? "text-green-400" : "text-red-400"
+            }`}
+          >
+            {allResolved
+              ? `✅ Все замечания исправлены (${feedback.length})`
+              : `⚠️ Полученные замечания (${unresolvedCount} нерешённых из ${feedback.length})`}
+          </h3>
+          <svg
+            className={`w-5 h-5 transition-transform flex-shrink-0 ${
+              allResolved ? "text-green-400" : "text-red-400"
+            } ${collapsed ? "" : "rotate-180"}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M19 9l-7 7-7-7"
+            />
+          </svg>
+        </button>
+
+        {/* Start fixing button — only for pending agents with unresolved feedback */}
+        {agentStatus === "pending" && !allResolved && projectId && agentId && (
+          <button
+            onClick={handleStartFixing}
+            disabled={starting}
+            className="ml-4 px-4 py-2 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
+          >
+            {starting ? "Запуск..." : "🔧 Запустить исправления"}
+          </button>
+        )}
+      </div>
 
       {!collapsed && (
         <div className="space-y-3 mt-4">

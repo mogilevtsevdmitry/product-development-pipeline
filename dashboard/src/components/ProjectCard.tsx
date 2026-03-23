@@ -8,6 +8,7 @@ interface ProjectCardProps {
   project_id: string;
   name: string;
   description: string;
+  project_path?: string;
   status: string;
   mode: string;
   created_at: string;
@@ -41,6 +42,7 @@ export default function ProjectCard({
   project_id,
   name,
   description,
+  project_path,
   status,
   mode,
   created_at,
@@ -96,6 +98,15 @@ export default function ProjectCard({
               {mode === "human_approval" ? "👤 Ручной" : "🤖 Авто"}
             </span>
           </div>
+
+          {project_path && (
+            <div className="flex items-center gap-2">
+              <span className="text-gray-500">Проект:</span>
+              <span className="font-mono text-xs text-blue-400 truncate max-w-[180px]" title={project_path}>
+                📁 {project_path.split("/").pop()}
+              </span>
+            </div>
+          )}
 
           <div className="flex items-center gap-2">
             <span className="text-gray-500">Создан:</span>

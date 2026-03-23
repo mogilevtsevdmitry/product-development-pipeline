@@ -500,6 +500,12 @@ export default function AgentDetailPage({
           <FeedbackReceivedBlock
             feedback={agent.feedback_received}
             agentLabels={AGENT_LABELS}
+            agentStatus={agent.status}
+            projectId={state.project_id}
+            agentId={agentKey}
+            onAgentStarted={() => {
+              fetch(`/api/state/${id}`).then(r => r.json()).then(setState).catch(() => {});
+            }}
           />
         )}
 
