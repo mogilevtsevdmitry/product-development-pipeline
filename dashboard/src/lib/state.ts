@@ -1675,6 +1675,96 @@ function finalizeAgent(
   }
 }
 
+// ============================================================================
+// Rate Limit Retry
+// ============================================================================
+
+/** Pending retry timers: projectId → Set<agentId> */
+const pendingRetries = new Map<string, Set<string>>();
+
+/**
+ * Schedule agent retry at the start of the next hour.
+ * Pauses the project and sets up a timer.
+ */
+function scheduleRateLimitRetry(
+  projectId: string,
+  agentId: string,
+  errorSnippet: string
+): void {
+  const state = getProjectState(projectId);
+  if (!state) return;
+
+  // Calculate next hour start + 1 minute
+  const now = new Date();
+  const nextHour = new Date(now);
+  nextHour.setHours(nextHour.getHours() + 1, 1, 0, 0); // XX:01:00
+  const delayMs = nextHour.getTime() - now.getTime();
+
+  const retryAt = nextHour.toISOString();
+  console.log(`[RateLimit] ${agentId}: will retry at ${retryAt} (in ${Math.round(delayMs / 60000)} min)`);
+
+  // Mark agent as waiting
+  state.agents[agentId].status = "pending";
+  state.agents[agentId].started_at = null;
+  state.agents[agentId].error = `⏳ Rate limit — повтор в ${nextHour.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+
+  // Pause ALL running agents to save tokens
+  for (const [aid, agent] of Object.entries(state.agents)) {
+    if (agent.status === "running" && aid !== agentId) {
+      agent.status = "pending";
+      agent.started_at = null;
+      agent.error = `⏳ Пауза (rate limit) — повтор в ${nextHour.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+      // Kill the process
+      const phase = AGENT_PHASES[aid] || "other";
+      const pidFile = path.join(PROJECTS_DIR, projectId, phase, aid, "_pid");
+      if (fs.existsSync(pidFile)) {
+        try {
+          const pid = parseInt(fs.readFileSync(pidFile, "utf-8").trim());
+          if (pid > 0) {
+            try { process.kill(-pid, "SIGKILL"); } catch { /* */ }
+            const { execSync } = require("child_process");
+            try { execSync(`pkill -9 -P ${pid} 2>/dev/null || true`, { timeout: 3000 }); } catch { /* */ }
+            try { process.kill(pid, "SIGKILL"); } catch { /* */ }
+          }
+        } catch { /* */ }
+      }
+    }
+  }
+
+  state.status = "paused";
+  state.updated_at = new Date().toISOString();
+  const fp = path.join(STATE_DIR, `${projectId}.json`);
+  fs.writeFileSync(fp, JSON.stringify(state, null, 2), "utf-8");
+
+  // Track retry
+  if (!pendingRetries.has(projectId)) pendingRetries.set(projectId, new Set());
+  pendingRetries.get(projectId)!.add(agentId);
+
+  // Schedule retry timer
+  setTimeout(() => {
+    console.log(`[RateLimit] Retry timer fired for ${projectId}`);
+    const retryState = getProjectState(projectId);
+    if (!retryState) return;
+
+    // Clear error messages
+    for (const agent of Object.values(retryState.agents)) {
+      if (agent.error?.includes("rate limit") || agent.error?.includes("Пауза (rate limit)")) {
+        agent.error = null;
+      }
+    }
+
+    // Resume pipeline
+    retryState.status = "running";
+    retryState.updated_at = new Date().toISOString();
+    const retryFp = path.join(STATE_DIR, `${projectId}.json`);
+    fs.writeFileSync(retryFp, JSON.stringify(retryState, null, 2), "utf-8");
+
+    // Launch ready agents
+    pendingRetries.get(projectId)?.delete(agentId);
+    runNextAgent(projectId);
+  }, delayMs);
+}
+
 /**
  * Запуск следующего агента — НЕ БЛОКИРУЕТ.
  * Ставит агента в running, спавнит процесс в фоне, возвращает управление сразу.
@@ -1884,6 +1974,23 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
 
     const logFile = path.join(outputDir, "_reasoning.md");
     fs.writeFileSync(logFile, logParts.join("\n"), "utf-8");
+
+    // Check for rate limit / auth errors before finalizing
+    const allOutput = (stderr + " " + stdout + " " + resultText).toLowerCase();
+    const isRateLimit = allOutput.includes("rate limit") ||
+      allOutput.includes("rate_limit") ||
+      allOutput.includes("429") ||
+      allOutput.includes("quota") ||
+      allOutput.includes("too many requests") ||
+      (allOutput.includes("403") && allOutput.includes("terminated")) ||
+      allOutput.includes("token limit") ||
+      allOutput.includes("billing");
+
+    if (isRateLimit && code !== 0) {
+      console.log(`[RateLimit] ${agentId}: rate limit detected, scheduling retry`);
+      scheduleRateLimitRetry(id, agentId, allOutput.slice(0, 500));
+      return; // Don't finalize — agent will be retried later
+    }
 
     if (code === 0 && resultText) {
       const outputFile = path.join(outputDir, `${agentId}-output.md`);
