@@ -1764,7 +1764,7 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
     {
       cwd: agentCwd,
       stdio: ["ignore", "pipe", "pipe"],
-      detached: false,
+      detached: true, // own process group so killAgent can kill -pgid
     }
   );
 
@@ -2060,7 +2060,9 @@ export function pauseAgent(id: string, agentId: string): boolean {
 }
 
 /**
- * Kill a running agent — terminate the process and set status to failed.
+ * Kill a running agent — terminate the process tree and reset status.
+ * The PID file contains the shell PID (/bin/sh), but claude runs as a child.
+ * We use pkill -P to kill child processes first, then the shell.
  */
 export function killAgent(id: string, agentId: string): boolean {
   const state = getProjectState(id);
@@ -2068,7 +2070,6 @@ export function killAgent(id: string, agentId: string): boolean {
   const agent = state.agents[agentId];
   if (!agent || agent.status !== "running") return false;
 
-  // Kill the process by PID
   const phase = AGENT_PHASES[agentId] || "other";
   const outputDir = path.join(PROJECTS_DIR, id, phase, agentId);
   const pidFile = path.join(outputDir, "_pid");
@@ -2077,10 +2078,12 @@ export function killAgent(id: string, agentId: string): boolean {
     try {
       const pid = parseInt(fs.readFileSync(pidFile, "utf-8").trim());
       if (pid > 0) {
-        // Kill the process tree (negative PID kills process group)
-        try { process.kill(-pid, "SIGKILL"); } catch { /* */ }
-        // Also try direct kill
-        try { process.kill(pid, "SIGKILL"); } catch { /* */ }
+        // Kill process group (works when spawned with detached: true)
+        try { process.kill(-pid, "SIGKILL"); } catch { /* not a group leader */ }
+        // Fallback: kill children via pkill then the shell
+        const { execSync } = require("child_process");
+        try { execSync(`pkill -9 -P ${pid} 2>/dev/null || true`, { timeout: 3000 }); } catch { /* */ }
+        try { process.kill(pid, "SIGKILL"); } catch { /* already dead */ }
       }
     } catch { /* pid file unreadable */ }
   }
