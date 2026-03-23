@@ -2060,12 +2060,28 @@ export function pauseAgent(id: string, agentId: string): boolean {
 }
 
 /**
- * Kill a running agent — terminate the entire process tree.
+ * Recursively collect all descendant PIDs of a process.
+ */
+function getDescendantPids(pid: number): number[] {
+  const { execSync } = require("child_process");
+  const result: number[] = [];
+  try {
+    const children = execSync(`pgrep -P ${pid} 2>/dev/null || true`, {
+      encoding: "utf-8", timeout: 3000,
+    }).trim().split("\n").filter(Boolean).map(Number).filter((n: number) => n > 0);
+    for (const child of children) {
+      result.push(child);
+      result.push(...getDescendantPids(child));
+    }
+  } catch { /* */ }
+  return result;
+}
+
+/**
+ * Kill a running agent — terminate the ENTIRE process tree.
  *
- * Strategy (multiple approaches for reliability):
- * 1. Kill process group via -pgid (works with detached: true)
- * 2. Find and kill all processes matching the agent's prompt file pattern
- * 3. Recursively kill all child processes via pkill -P
+ * claude spawns: /bin/sh → claude → /bin/zsh → docker compose build → ...
+ * We must kill the full tree, bottom-up.
  */
 export function killAgent(id: string, agentId: string): boolean {
   const state = getProjectState(id);
@@ -2078,51 +2094,51 @@ export function killAgent(id: string, agentId: string): boolean {
   const pidFile = path.join(outputDir, "_pid");
   const { execSync } = require("child_process");
 
-  // Method 1: Kill by PID from file (process group + children)
+  const allPids = new Set<number>();
+
+  // 1. From PID file
   if (fs.existsSync(pidFile)) {
     try {
       const pid = parseInt(fs.readFileSync(pidFile, "utf-8").trim());
       if (pid > 0) {
-        // Kill process group (negative PID)
-        try { process.kill(-pid, "SIGKILL"); } catch { /* */ }
-        // Kill children recursively
-        try { execSync(`pkill -9 -P ${pid} 2>/dev/null || true`, { timeout: 3000 }); } catch { /* */ }
-        // Kill the process itself
-        try { process.kill(pid, "SIGKILL"); } catch { /* */ }
+        allPids.add(pid);
+        for (const d of getDescendantPids(pid)) allPids.add(d);
       }
     } catch { /* */ }
   }
 
-  // Method 2: Find ALL processes related to this agent by prompt file pattern
-  // This catches cases where PID file is stale (agent was restarted)
+  // 2. By prompt file pattern (catches stale PID / restart cases)
   try {
-    const pattern = `agent-prompt-${agentId}`;
-    // Find shell processes running this agent's prompt
     const pids = execSync(
-      `pgrep -f "${pattern}" 2>/dev/null || true`,
+      `pgrep -f "agent-prompt-${agentId}" 2>/dev/null || true`,
       { encoding: "utf-8", timeout: 3000 }
-    ).trim().split("\n").filter(Boolean);
-
-    for (const pidStr of pids) {
-      const pid = parseInt(pidStr);
-      if (isNaN(pid) || pid <= 0) continue;
-      // Kill children first (claude process, its bash subshells, docker, etc.)
-      try { execSync(`pkill -9 -P ${pid} 2>/dev/null || true`, { timeout: 3000 }); } catch { /* */ }
-      try { process.kill(pid, "SIGKILL"); } catch { /* */ }
+    ).trim().split("\n").filter(Boolean).map(Number);
+    for (const pid of pids) {
+      if (pid > 0) {
+        allPids.add(pid);
+        for (const d of getDescendantPids(pid)) allPids.add(d);
+      }
     }
   } catch { /* */ }
 
-  // Method 3: Kill any orphaned claude processes spawned by this agent's shell
-  // These have the agent output dir as CWD
+  // 3. By CWD pattern — catches claude's spawned zsh/bash/docker subprocesses
   try {
-    const cwdPattern = `${id}/${phase}/${agentId}`;
-    execSync(
-      `pgrep -f "claude.*--dangerously" | while read p; do
-        lsof -p "$p" 2>/dev/null | grep -q "${cwdPattern}" && kill -9 "$p" 2>/dev/null
-      done || true`,
-      { timeout: 5000, encoding: "utf-8" }
-    );
+    const cwdPath = outputDir.replace(/'/g, "'\\''");
+    const pids = execSync(
+      `lsof +D '${cwdPath}' 2>/dev/null | awk 'NR>1{print $2}' | sort -u || true`,
+      { encoding: "utf-8", timeout: 5000 }
+    ).trim().split("\n").filter(Boolean).map(Number);
+    for (const pid of pids) {
+      if (pid > 0) allPids.add(pid);
+    }
   } catch { /* */ }
+
+  // Kill all collected PIDs, bottom-up (children first)
+  const sorted = Array.from(allPids).sort((a, b) => b - a);
+  console.log(`[killAgent] ${agentId}: killing ${sorted.length} processes: ${sorted.join(", ")}`);
+  for (const pid of sorted) {
+    try { process.kill(pid, "SIGKILL"); } catch { /* already dead */ }
+  }
 
   agent.status = "pending";
   agent.started_at = null;
