@@ -2087,7 +2087,8 @@ export function killAgent(id: string, agentId: string): boolean {
   const state = getProjectState(id);
   if (!state) return false;
   const agent = state.agents[agentId];
-  if (!agent || agent.status !== "running") return false;
+  if (!agent) return false;
+  // Don't check status — process may still be alive even if status changed
 
   const phase = AGENT_PHASES[agentId] || "other";
   const outputDir = path.join(PROJECTS_DIR, id, phase, agentId);
@@ -2140,8 +2141,9 @@ export function killAgent(id: string, agentId: string): boolean {
     try { process.kill(pid, "SIGKILL"); } catch { /* already dead */ }
   }
 
-  agent.status = "pending";
+  agent.status = "failed";
   agent.started_at = null;
+  agent.completed_at = new Date().toISOString();
   agent.error = "Принудительно остановлен";
   state.updated_at = new Date().toISOString();
 

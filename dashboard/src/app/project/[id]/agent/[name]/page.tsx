@@ -194,10 +194,10 @@ export default function AgentDetailPage({
           <p className="text-gray-500 text-sm font-mono mt-1">{agentKey}</p>
         </div>
         <div className="flex items-center gap-3">
-          {agent.status === "running" && (
+          {(agent.status === "running" || (agent.status === "pending" && agent.error === "Принудительно остановлен")) && (
             <button
               onClick={async () => {
-                if (!confirm("Принудительно остановить агента? Процесс будет убит.")) return;
+                if (agent.status === "running" && !confirm("Принудительно остановить агента? Процесс будет убит.")) return;
                 await fetch(`/api/state/${id}`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
