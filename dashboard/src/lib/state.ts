@@ -2060,6 +2060,42 @@ export function pauseAgent(id: string, agentId: string): boolean {
 }
 
 /**
+ * Kill a running agent — terminate the process and set status to failed.
+ */
+export function killAgent(id: string, agentId: string): boolean {
+  const state = getProjectState(id);
+  if (!state) return false;
+  const agent = state.agents[agentId];
+  if (!agent || agent.status !== "running") return false;
+
+  // Kill the process by PID
+  const phase = AGENT_PHASES[agentId] || "other";
+  const outputDir = path.join(PROJECTS_DIR, id, phase, agentId);
+  const pidFile = path.join(outputDir, "_pid");
+
+  if (fs.existsSync(pidFile)) {
+    try {
+      const pid = parseInt(fs.readFileSync(pidFile, "utf-8").trim());
+      if (pid > 0) {
+        // Kill the process tree (negative PID kills process group)
+        try { process.kill(-pid, "SIGKILL"); } catch { /* */ }
+        // Also try direct kill
+        try { process.kill(pid, "SIGKILL"); } catch { /* */ }
+      }
+    } catch { /* pid file unreadable */ }
+  }
+
+  agent.status = "pending";
+  agent.started_at = null;
+  agent.error = "Принудительно остановлен";
+  state.updated_at = new Date().toISOString();
+
+  const fp = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(fp, JSON.stringify(state, null, 2), "utf-8");
+  return true;
+}
+
+/**
  * Run a specific agent by ID (not just "next ready").
  */
 export function runSpecificAgent(id: string, agentId: string): {

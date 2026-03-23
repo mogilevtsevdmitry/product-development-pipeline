@@ -193,7 +193,26 @@ export default function AgentDetailPage({
           <h1 className="text-2xl font-bold text-white">{label}</h1>
           <p className="text-gray-500 text-sm font-mono mt-1">{agentKey}</p>
         </div>
-        <StatusBadge status={agent.status as AgentStatus} />
+        <div className="flex items-center gap-3">
+          {agent.status === "running" && (
+            <button
+              onClick={async () => {
+                if (!confirm("Принудительно остановить агента? Процесс будет убит.")) return;
+                await fetch(`/api/state/${id}`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ action: "kill_agent", agentId: agentKey }),
+                });
+                const res = await fetch(`/api/state/${id}`);
+                if (res.ok) setState(await res.json());
+              }}
+              className="px-3 py-1.5 text-sm font-medium rounded-lg bg-red-600 text-white hover:bg-red-500 transition-colors"
+            >
+              ⏹ Остановить
+            </button>
+          )}
+          <StatusBadge status={agent.status as AgentStatus} />
+        </div>
       </div>
 
       {/* Tabs */}

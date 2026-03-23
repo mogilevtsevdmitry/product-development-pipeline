@@ -75,13 +75,22 @@ function AgentNodeComponent({ id, data }: NodeProps) {
         <div className="absolute -top-10 left-1/2 -translate-x-1/2 pb-2 z-50">
         <div className="flex items-center gap-1 bg-gray-900 border border-gray-700 rounded-lg px-1.5 py-1 shadow-xl">
           {status === "running" && (
-            <button
-              onClick={(e) => { e.stopPropagation(); sendAction("pause_agent"); }}
-              className="p-1 rounded hover:bg-yellow-500/20 text-yellow-400 text-xs"
-              title="Пауза"
-            >
-              ⏸
-            </button>
+            <>
+              <button
+                onClick={(e) => { e.stopPropagation(); sendAction("pause_agent"); }}
+                className="p-1 rounded hover:bg-yellow-500/20 text-yellow-400 text-xs"
+                title="Пауза (процесс продолжит работу)"
+              >
+                ⏸
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); sendAction("kill_agent"); }}
+                className="p-1 rounded hover:bg-red-500/20 text-red-400 text-xs"
+                title="Остановить (убить процесс)"
+              >
+                ⏹
+              </button>
+            </>
           )}
           {(status === "pending" || status === "failed" || status === "skipped") && (
             <button

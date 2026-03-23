@@ -12,6 +12,7 @@ import {
   restartAgent,
   reactivateToGate,
   pauseAgent,
+  killAgent,
   runSpecificAgent,
   removeAgentFromPipeline,
 } from "@/lib/state";
@@ -91,6 +92,12 @@ export async function POST(
 
   if (body.action === "pause_agent" && body.agentId) {
     const ok = pauseAgent(id, body.agentId);
+    if (!ok) return NextResponse.json({ error: "Агент не запущен" }, { status: 400 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "kill_agent" && body.agentId) {
+    const ok = killAgent(id, body.agentId);
     if (!ok) return NextResponse.json({ error: "Агент не запущен" }, { status: 400 });
     return NextResponse.json({ ok: true });
   }
