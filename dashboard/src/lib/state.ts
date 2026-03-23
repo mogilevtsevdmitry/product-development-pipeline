@@ -247,10 +247,10 @@ export function createProject(
   }
 
   // Начальное состояние — только статическая цепочка
-  const agentsState: Record<string, { status: string; started_at: null; completed_at: null; artifacts: string[]; error: null }> = {};
+  const agentsState: Record<string, import("./types").AgentState> = {};
   for (const agentId of STATIC_CHAIN) {
     agentsState[agentId] = {
-      status: "pending",
+      status: "pending" as const,
       started_at: null,
       completed_at: null,
       artifacts: [],
@@ -1204,7 +1204,29 @@ function prepareAgentPrompt(
     skillsContent ? `\n\n# Навыки и знания\n${skillsContent}` : "",
     agentSpecificContext,
     context ? `\n\n# Входные данные\n\n${context}` : "",
-    `\n\n# Инструкции\n\nВыполни задачу и верни результат в формате Markdown. Весь твой вывод будет сохранён как артефакт. Не пиши ничего лишнего — только структурированный отчёт.`,
+    CODE_AGENTS.has(agentId)
+      ? `\n\n# Инструкции
+
+Ты работаешь как автономный агент. Выполни задачу ПОЛНОСТЬЮ за одну сессию.
+
+## Стратегия работы
+1. СНАЧАЛА изучи текущую структуру проекта (ls, find, cat package.json)
+2. Составь план работы — запиши его для себя
+3. Реализуй КАЖДЫЙ пункт плана — не пропускай
+4. После реализации — проверь: запусти тесты, проверь сборку
+5. Если что-то не работает — ИСПРАВЬ, не оставляй сломанным
+
+## Управление контекстом
+- Если задача большая — разбей на подзадачи и выполняй последовательно
+- Используй TodoWrite для отслеживания прогресса
+- Если контекст заканчивается — сохрани промежуточный результат и напиши summary
+- НЕ пиши "TODO: реализовать позже" — реализуй СЕЙЧАС
+
+## Вывод
+Весь код пиши ПРЯМО В ФАЙЛЫ проекта (через Edit/Write tool).
+В stdout верни ТОЛЬКО краткий отчёт: что сделано, какие файлы созданы/изменены, результаты тестов.
+Формат отчёта — Markdown.`
+      : `\n\n# Инструкции\n\nВыполни задачу и верни результат в формате Markdown. Весь твой вывод будет сохранён как артефакт. Не пиши ничего лишнего — только структурированный отчёт.`,
   ].join("");
 
   const tmpFile = path.join(os.tmpdir(), `agent-prompt-${agentId}-${Date.now()}.md`);
@@ -1373,6 +1395,127 @@ function checkGates(state: ProjectState): string | null {
 }
 
 /**
+ * Parse structured feedback from agent output (json:feedback blocks).
+ * QA/Security/DevOps agents output feedback in this format:
+ * ```json:feedback
+ * [{ "to_agent": "backend-developer", "severity": "critical", "description": "..." }]
+ * ```
+ */
+function parseAutoFeedback(
+  agentId: string,
+  outputDir: string
+): { to_agent: string; severity: string; description: string }[] {
+  const results: { to_agent: string; severity: string; description: string }[] = [];
+
+  // Read agent output file
+  const outputFile = path.join(outputDir, `${agentId}-output.md`);
+  if (!fs.existsSync(outputFile)) return results;
+
+  const content = fs.readFileSync(outputFile, "utf-8");
+
+  // Find all ```json:feedback blocks
+  const feedbackRegex = /```json:feedback\s*\n([\s\S]*?)```/g;
+  let match;
+  while ((match = feedbackRegex.exec(content)) !== null) {
+    try {
+      const items = JSON.parse(match[1]);
+      if (Array.isArray(items)) {
+        for (const item of items) {
+          if (item.to_agent && item.severity && item.description) {
+            results.push({
+              to_agent: item.to_agent,
+              severity: item.severity,
+              description: item.description,
+            });
+          }
+        }
+      }
+    } catch {
+      console.warn(`[parseAutoFeedback] Failed to parse feedback from ${agentId}`);
+    }
+  }
+
+  return results;
+}
+
+/** Agents that produce auto-feedback (QA, Security, DevOps) */
+const FEEDBACK_AGENTS = new Set(["qa-engineer", "security-engineer", "devops-engineer"]);
+
+/** Max auto-feedback iterations to prevent infinite loops */
+const MAX_FEEDBACK_ITERATIONS = 3;
+
+/**
+ * Apply auto-feedback: create feedback items, reset target agents, auto-start them.
+ */
+function applyAutoFeedback(
+  state: ProjectState,
+  id: string,
+  fromAgent: string,
+  feedbackItems: { to_agent: string; severity: string; description: string }[]
+): boolean {
+  if (feedbackItems.length === 0) return false;
+
+  const now = new Date().toISOString();
+  let anyTargetReset = false;
+
+  // Group by target agent
+  const byTarget = new Map<string, typeof feedbackItems>();
+  for (const item of feedbackItems) {
+    if (!byTarget.has(item.to_agent)) byTarget.set(item.to_agent, []);
+    byTarget.get(item.to_agent)!.push(item);
+  }
+
+  for (const [targetAgent, items] of byTarget) {
+    const target = state.agents[targetAgent];
+    if (!target) continue;
+
+    // Check iteration count to prevent infinite loops
+    const existingFeedback = target.feedback_received || [];
+    const iterationsFromSameAgent = existingFeedback.filter(
+      (f) => f.from_agent === fromAgent && f.resolved
+    ).length;
+
+    if (iterationsFromSameAgent >= MAX_FEEDBACK_ITERATIONS) {
+      console.log(`[AutoFeedback] Max iterations (${MAX_FEEDBACK_ITERATIONS}) reached for ${fromAgent} → ${targetAgent}, skipping`);
+      continue;
+    }
+
+    // Create feedback items
+    const newFeedback: import("./types").FeedbackItem[] = items.map((item) => ({
+      from_agent: fromAgent,
+      to_agent: targetAgent,
+      severity: item.severity as "critical" | "high" | "medium" | "low",
+      description: item.description,
+      created_at: now,
+      resolved: false,
+    }));
+
+    // Add to target agent's feedback_received
+    if (!target.feedback_received) target.feedback_received = [];
+    target.feedback_received.push(...newFeedback);
+
+    // Add to sender's feedback_sent
+    const sender = state.agents[fromAgent];
+    if (sender) {
+      if (!sender.feedback_sent) sender.feedback_sent = [];
+      sender.feedback_sent.push(...newFeedback);
+    }
+
+    // Reset target agent to pending (so it can be re-launched)
+    if (target.status === "completed" || target.status === "failed") {
+      target.status = "pending";
+      target.started_at = null;
+      target.completed_at = null;
+      target.error = null;
+      // Don't clear artifacts — agent will modify existing code
+      anyTargetReset = true;
+    }
+  }
+
+  return anyTargetReset;
+}
+
+/**
  * Обновить state после завершения агента.
  */
 function finalizeAgent(
@@ -1444,6 +1587,18 @@ function finalizeAgent(
         }
       }
     }
+
+    // Auto-feedback: QA/Security/DevOps → parse structured findings → reset target agents
+    if (FEEDBACK_AGENTS.has(agentId)) {
+      const feedbackItems = parseAutoFeedback(agentId, outputDir);
+      if (feedbackItems.length > 0) {
+        console.log(`[AutoFeedback] ${agentId} produced ${feedbackItems.length} feedback items`);
+        const anyReset = applyAutoFeedback(state, id, agentId, feedbackItems);
+        if (anyReset) {
+          console.log(`[AutoFeedback] Target agents reset, will auto-launch after state save`);
+        }
+      }
+    }
   } else {
     state.agents[agentId].status = "failed";
     state.agents[agentId].error = errorMsg || "Неизвестная ошибка";
@@ -1494,6 +1649,30 @@ function finalizeAgent(
 
   const fp = path.join(STATE_DIR, `${id}.json`);
   fs.writeFileSync(fp, JSON.stringify(state, null, 2), "utf-8");
+
+  // Auto-launch agents that were reset by feedback (in auto mode)
+  if (success && state.mode === "auto" && state.status === "running") {
+    const readyToLaunch = findReadyAgents(state);
+    if (readyToLaunch.length > 0) {
+      console.log(`[AutoLaunch] After ${agentId}: launching ${readyToLaunch.join(", ")}`);
+      // Re-read state to get fresh data
+      const freshState = getProjectState(id);
+      if (freshState) {
+        for (const nextAgent of readyToLaunch) {
+          if (freshState.agents[nextAgent]?.status === "pending") {
+            freshState.agents[nextAgent].status = "running";
+            freshState.agents[nextAgent].started_at = new Date().toISOString();
+            freshState.agents[nextAgent].error = null;
+          }
+        }
+        freshState.updated_at = new Date().toISOString();
+        fs.writeFileSync(fp, JSON.stringify(freshState, null, 2), "utf-8");
+        for (const nextAgent of readyToLaunch) {
+          spawnAgent(id, nextAgent, freshState);
+        }
+      }
+    }
+  }
 }
 
 /**
