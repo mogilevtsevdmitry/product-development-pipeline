@@ -1406,33 +1406,38 @@ function parseAutoFeedback(
   outputDir: string
 ): { to_agent: string; severity: string; description: string }[] {
   const results: { to_agent: string; severity: string; description: string }[] = [];
+  if (!fs.existsSync(outputDir)) return results;
 
-  // Read agent output file
-  const outputFile = path.join(outputDir, `${agentId}-output.md`);
-  if (!fs.existsSync(outputFile)) return results;
+  // Read ALL .md files in agent's output dir (not just *-output.md)
+  // Agents may write json:feedback in qa_report.md, security_report.md, etc.
+  const mdFiles = fs.readdirSync(outputDir)
+    .filter((f) => f.endsWith(".md") && !f.startsWith("_"))
+    .map((f) => path.join(outputDir, f));
 
-  const content = fs.readFileSync(outputFile, "utf-8");
-
-  // Find all ```json:feedback blocks
-  const feedbackRegex = /```json:feedback\s*\n([\s\S]*?)```/g;
-  let match;
-  while ((match = feedbackRegex.exec(content)) !== null) {
+  for (const filePath of mdFiles) {
     try {
-      const items = JSON.parse(match[1]);
-      if (Array.isArray(items)) {
-        for (const item of items) {
-          if (item.to_agent && item.severity && item.description) {
-            results.push({
-              to_agent: item.to_agent,
-              severity: item.severity,
-              description: item.description,
-            });
+      const content = fs.readFileSync(filePath, "utf-8");
+      const feedbackRegex = /```json:feedback\s*\n([\s\S]*?)```/g;
+      let match;
+      while ((match = feedbackRegex.exec(content)) !== null) {
+        try {
+          const items = JSON.parse(match[1]);
+          if (Array.isArray(items)) {
+            for (const item of items) {
+              if (item.to_agent && item.severity && item.description) {
+                results.push({
+                  to_agent: item.to_agent,
+                  severity: item.severity,
+                  description: item.description,
+                });
+              }
+            }
           }
+        } catch {
+          console.warn(`[parseAutoFeedback] Failed to parse feedback JSON in ${path.basename(filePath)}`);
         }
       }
-    } catch {
-      console.warn(`[parseAutoFeedback] Failed to parse feedback from ${agentId}`);
-    }
+    } catch { /* unreadable file */ }
   }
 
   return results;
