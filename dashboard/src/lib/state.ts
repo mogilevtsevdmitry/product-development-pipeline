@@ -2060,9 +2060,12 @@ export function pauseAgent(id: string, agentId: string): boolean {
 }
 
 /**
- * Kill a running agent — terminate the process tree and reset status.
- * The PID file contains the shell PID (/bin/sh), but claude runs as a child.
- * We use pkill -P to kill child processes first, then the shell.
+ * Kill a running agent — terminate the entire process tree.
+ *
+ * Strategy (multiple approaches for reliability):
+ * 1. Kill process group via -pgid (works with detached: true)
+ * 2. Find and kill all processes matching the agent's prompt file pattern
+ * 3. Recursively kill all child processes via pkill -P
  */
 export function killAgent(id: string, agentId: string): boolean {
   const state = getProjectState(id);
@@ -2073,20 +2076,53 @@ export function killAgent(id: string, agentId: string): boolean {
   const phase = AGENT_PHASES[agentId] || "other";
   const outputDir = path.join(PROJECTS_DIR, id, phase, agentId);
   const pidFile = path.join(outputDir, "_pid");
+  const { execSync } = require("child_process");
 
+  // Method 1: Kill by PID from file (process group + children)
   if (fs.existsSync(pidFile)) {
     try {
       const pid = parseInt(fs.readFileSync(pidFile, "utf-8").trim());
       if (pid > 0) {
-        // Kill process group (works when spawned with detached: true)
-        try { process.kill(-pid, "SIGKILL"); } catch { /* not a group leader */ }
-        // Fallback: kill children via pkill then the shell
-        const { execSync } = require("child_process");
+        // Kill process group (negative PID)
+        try { process.kill(-pid, "SIGKILL"); } catch { /* */ }
+        // Kill children recursively
         try { execSync(`pkill -9 -P ${pid} 2>/dev/null || true`, { timeout: 3000 }); } catch { /* */ }
-        try { process.kill(pid, "SIGKILL"); } catch { /* already dead */ }
+        // Kill the process itself
+        try { process.kill(pid, "SIGKILL"); } catch { /* */ }
       }
-    } catch { /* pid file unreadable */ }
+    } catch { /* */ }
   }
+
+  // Method 2: Find ALL processes related to this agent by prompt file pattern
+  // This catches cases where PID file is stale (agent was restarted)
+  try {
+    const pattern = `agent-prompt-${agentId}`;
+    // Find shell processes running this agent's prompt
+    const pids = execSync(
+      `pgrep -f "${pattern}" 2>/dev/null || true`,
+      { encoding: "utf-8", timeout: 3000 }
+    ).trim().split("\n").filter(Boolean);
+
+    for (const pidStr of pids) {
+      const pid = parseInt(pidStr);
+      if (isNaN(pid) || pid <= 0) continue;
+      // Kill children first (claude process, its bash subshells, docker, etc.)
+      try { execSync(`pkill -9 -P ${pid} 2>/dev/null || true`, { timeout: 3000 }); } catch { /* */ }
+      try { process.kill(pid, "SIGKILL"); } catch { /* */ }
+    }
+  } catch { /* */ }
+
+  // Method 3: Kill any orphaned claude processes spawned by this agent's shell
+  // These have the agent output dir as CWD
+  try {
+    const cwdPattern = `${id}/${phase}/${agentId}`;
+    execSync(
+      `pgrep -f "claude.*--dangerously" | while read p; do
+        lsof -p "$p" 2>/dev/null | grep -q "${cwdPattern}" && kill -9 "$p" 2>/dev/null
+      done || true`,
+      { timeout: 5000, encoding: "utf-8" }
+    );
+  } catch { /* */ }
 
   agent.status = "pending";
   agent.started_at = null;
