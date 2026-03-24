@@ -101,7 +101,7 @@ export interface AgentState {
   current_run?: number;               // текущий номер запуска
 }
 
-// --- Pipeline Graph ---
+// --- Pipeline Graph (legacy, schema v1) ---
 
 export interface PipelineGraph {
   nodes: string[];
@@ -109,19 +109,75 @@ export interface PipelineGraph {
   parallel_groups: string[][];
 }
 
+// --- Pipeline Blocks (schema v2) ---
+
+export type BlockStatus =
+  | "completed"
+  | "running"
+  | "pending"
+  | "blocked"
+  | "awaiting_approval"
+  | "failed";
+
+export interface BlockApproval {
+  decision: "go" | "stop";
+  decided_by: string;
+  timestamp: string;
+  notes?: string;
+}
+
+export interface PipelineBlock {
+  id: string;
+  name: string;
+  description?: string;
+  agents: string[];
+  edges: [string, string][];
+  requires_approval: boolean;
+  approval?: BlockApproval;
+}
+
+// --- Block status computation ---
+
+export function computeBlockStatus(
+  block: PipelineBlock,
+  agents: Record<string, AgentState>,
+  prevBlockStatus?: BlockStatus
+): BlockStatus {
+  const blockAgents = block.agents.map((id) => agents[id]).filter(Boolean);
+  if (blockAgents.length === 0) return "pending";
+
+  const hasRunning = blockAgents.some((a) => a.status === "running");
+  const hasFailed = blockAgents.some((a) => a.status === "failed");
+  const allDone = blockAgents.every(
+    (a) => a.status === "completed" || a.status === "skipped"
+  );
+
+  if (hasFailed) return "failed";
+  if (allDone && block.requires_approval && !block.approval) return "awaiting_approval";
+  if (allDone) return "completed";
+  if (hasRunning) return "running";
+
+  // Check if blocked by previous block
+  if (prevBlockStatus && prevBlockStatus !== "completed") return "blocked";
+
+  return "pending";
+}
+
 // --- Project State ---
-// Совпадает с Python orchestrator engine.py create_project()
 
 export interface ProjectState {
   project_id: string;
   name: string;
   description: string;
-  project_path?: string;          // абсолютный путь к внешнему проекту (опционально)
+  project_path?: string;
   created_at: string;
   updated_at: string;
   mode: PipelineMode;
   status: ProjectStatus;
   current_gate: GateType | string | null;
+  // Schema v2: blocks-based pipeline
+  blocks: PipelineBlock[];
+  // Legacy (schema v1, kept for migration)
   pipeline_graph: PipelineGraph;
   agents: Record<string, AgentState>;
   gate_decisions: Record<string, GateDecision | null>;

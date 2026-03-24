@@ -15,6 +15,13 @@ import {
   killAgent,
   runSpecificAgent,
   removeAgentFromPipeline,
+  resolveBlockApproval,
+  addBlock,
+  removeBlock,
+  updateBlock,
+  reorderBlocks,
+  addAgentToBlock,
+  removeAgentFromBlock,
 } from "@/lib/state";
 import type { GateType, GateDecisionValue, PipelineMode } from "@/lib/types";
 
@@ -110,6 +117,54 @@ export async function POST(
   if (body.action === "remove_agent" && body.agentId) {
     const result = removeAgentFromPipeline(id, body.agentId);
     return NextResponse.json(result, { status: result.ok ? 200 : 400 });
+  }
+
+  // --- Block actions ---
+
+  if (body.action === "block_approval" && body.blockId && body.decision) {
+    const ok = resolveBlockApproval(id, body.blockId, body.decision, body.notes);
+    if (!ok) return NextResponse.json({ error: "Не удалось обработать решение" }, { status: 400 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "add_block") {
+    const ok = addBlock(id, body.name || "Новый блок", body.description, body.requires_approval, body.after_block_id);
+    if (!ok) return NextResponse.json({ error: "Не удалось добавить блок" }, { status: 400 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "remove_block" && body.block_id) {
+    const ok = removeBlock(id, body.block_id);
+    if (!ok) return NextResponse.json({ error: "Не удалось удалить блок" }, { status: 400 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "update_block" && body.block_id) {
+    const ok = updateBlock(id, body.block_id, {
+      name: body.name,
+      description: body.description,
+      requires_approval: body.requires_approval,
+    });
+    if (!ok) return NextResponse.json({ error: "Не удалось обновить блок" }, { status: 400 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "reorder_blocks" && body.block_ids) {
+    const ok = reorderBlocks(id, body.block_ids);
+    if (!ok) return NextResponse.json({ error: "Не удалось изменить порядок блоков" }, { status: 400 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "add_agent_to_block" && body.block_id && body.agent_id) {
+    const ok = addAgentToBlock(id, body.block_id, body.agent_id);
+    if (!ok) return NextResponse.json({ error: "Не удалось добавить агента в блок" }, { status: 400 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "remove_agent_from_block" && body.block_id && body.agent_id) {
+    const ok = removeAgentFromBlock(id, body.block_id, body.agent_id);
+    if (!ok) return NextResponse.json({ error: "Не удалось удалить агента из блока" }, { status: 400 });
+    return NextResponse.json({ ok: true });
   }
 
   // --- Gate-решение ---

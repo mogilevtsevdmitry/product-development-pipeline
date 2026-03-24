@@ -18,7 +18,7 @@ STATE_DIR: Path = Path(__file__).resolve().parent / "state"
 DASHBOARD_DIR: Path = BASE_DIR / "dashboard"
 
 # Версия схемы состояния
-SCHEMA_VERSION: int = 1
+SCHEMA_VERSION: int = 2
 
 # =============================================================================
 # Реестр агентов
@@ -110,6 +110,101 @@ PHASES: Dict[str, List[str]] = {
         "data-analyst",
     ],
 }
+
+
+# =============================================================================
+# Блоки по умолчанию для новых проектов
+# =============================================================================
+
+DEFAULT_BLOCKS: List[Dict[str, Any]] = [
+    {
+        "id": "research",
+        "name": "Исследование",
+        "description": "Анализ проблемы, исследование рынка, формирование продуктового видения",
+        "agents": ["problem-researcher", "market-researcher", "product-owner", "business-analyst"],
+        "edges": [
+            ["problem-researcher", "market-researcher"],
+            ["market-researcher", "product-owner"],
+            ["product-owner", "business-analyst"],
+        ],
+        "requires_approval": True,
+    },
+    {
+        "id": "legal",
+        "name": "Юридическое",
+        "description": "Проверка юридических и compliance требований",
+        "agents": ["legal-compliance"],
+        "edges": [],
+        "requires_approval": False,
+    },
+    {
+        "id": "design",
+        "name": "Дизайн",
+        "description": "Проектирование пользовательского интерфейса и опыта",
+        "agents": ["ux-ui-designer"],
+        "edges": [],
+        "requires_approval": False,
+    },
+    {
+        "id": "development",
+        "name": "Архитектура и разработка",
+        "description": "Проектирование архитектуры, планирование и реализация",
+        "agents": ["pipeline-architect", "system-architect", "tech-lead", "backend-developer", "frontend-developer", "devops-engineer"],
+        "edges": [
+            ["pipeline-architect", "system-architect"],
+            ["system-architect", "tech-lead"],
+            ["tech-lead", "backend-developer"],
+            ["tech-lead", "frontend-developer"],
+            ["tech-lead", "devops-engineer"],
+        ],
+        "requires_approval": True,
+    },
+    {
+        "id": "testing",
+        "name": "Тестирование",
+        "description": "Проверка качества и безопасности",
+        "agents": ["qa-engineer", "security-engineer"],
+        "edges": [],
+        "requires_approval": True,
+    },
+    {
+        "id": "release",
+        "name": "Релиз",
+        "description": "Подготовка и выпуск релиза",
+        "agents": ["release-manager"],
+        "edges": [],
+        "requires_approval": False,
+    },
+    {
+        "id": "marketing",
+        "name": "Маркетинг",
+        "description": "Продвижение продукта, SMM, контент",
+        "agents": ["product-marketer", "smm-manager", "content-creator"],
+        "edges": [
+            ["product-marketer", "smm-manager"],
+            ["product-marketer", "content-creator"],
+        ],
+        "requires_approval": False,
+    },
+    {
+        "id": "feedback",
+        "name": "Фидбек",
+        "description": "Поддержка пользователей и аналитика",
+        "agents": ["customer-support", "data-analyst"],
+        "edges": [],
+        "requires_approval": False,
+    },
+]
+
+
+def get_agent_block(agent_id: str) -> str:
+    """Возвращает ID блока, к которому принадлежит агент."""
+    for block in DEFAULT_BLOCKS:
+        if agent_id in block["agents"]:
+            return block["id"]
+    if agent_id in ("orchestrator",):
+        return "meta"
+    raise ValueError(f"Агент не найден ни в одном блоке: {agent_id}")
 
 
 def get_agent_phase(agent_id: str) -> str:

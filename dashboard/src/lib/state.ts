@@ -23,6 +23,122 @@ function ensureDir(dir: string): void {
   }
 }
 
+// Default blocks for new projects (matches Python orchestrator config.py)
+const DEFAULT_BLOCKS: import("./types").PipelineBlock[] = [
+  {
+    id: "research",
+    name: "Исследование",
+    description: "Анализ проблемы, исследование рынка, формирование продуктового видения",
+    agents: ["problem-researcher", "market-researcher", "product-owner", "business-analyst"],
+    edges: [["problem-researcher", "market-researcher"], ["market-researcher", "product-owner"], ["product-owner", "business-analyst"]],
+    requires_approval: true,
+  },
+  {
+    id: "legal",
+    name: "Юридическое",
+    description: "Проверка юридических и compliance требований",
+    agents: ["legal-compliance"],
+    edges: [],
+    requires_approval: false,
+  },
+  {
+    id: "design",
+    name: "Дизайн",
+    description: "Проектирование пользовательского интерфейса и опыта",
+    agents: ["ux-ui-designer"],
+    edges: [],
+    requires_approval: false,
+  },
+  {
+    id: "development",
+    name: "Архитектура и разработка",
+    description: "Проектирование архитектуры, планирование и реализация",
+    agents: ["pipeline-architect", "system-architect", "tech-lead", "backend-developer", "frontend-developer", "devops-engineer"],
+    edges: [["pipeline-architect", "system-architect"], ["system-architect", "tech-lead"], ["tech-lead", "backend-developer"], ["tech-lead", "frontend-developer"], ["tech-lead", "devops-engineer"]],
+    requires_approval: true,
+  },
+  {
+    id: "testing",
+    name: "Тестирование",
+    description: "Проверка качества и безопасности",
+    agents: ["qa-engineer", "security-engineer"],
+    edges: [],
+    requires_approval: true,
+  },
+  {
+    id: "release",
+    name: "Релиз",
+    description: "Подготовка и выпуск релиза",
+    agents: ["release-manager"],
+    edges: [],
+    requires_approval: false,
+  },
+  {
+    id: "marketing",
+    name: "Маркетинг",
+    description: "Продвижение продукта, SMM, контент",
+    agents: ["product-marketer", "smm-manager", "content-creator"],
+    edges: [["product-marketer", "smm-manager"], ["product-marketer", "content-creator"]],
+    requires_approval: false,
+  },
+  {
+    id: "feedback",
+    name: "Фидбек",
+    description: "Поддержка пользователей и аналитика",
+    agents: ["customer-support", "data-analyst"],
+    edges: [],
+    requires_approval: false,
+  },
+];
+
+function migrateToV2(state: ProjectState): ProjectState {
+  if (state.schema_version >= 2 && state.blocks?.length) return state;
+
+  // Build blocks from existing pipeline_graph by matching agents to default blocks
+  const graphNodes = new Set(state.pipeline_graph?.nodes || []);
+  const blocks: import("./types").PipelineBlock[] = [];
+
+  for (const defaultBlock of DEFAULT_BLOCKS) {
+    const blockAgents = defaultBlock.agents.filter((a) => graphNodes.has(a));
+    if (blockAgents.length === 0) continue;
+
+    const blockEdges = defaultBlock.edges.filter(
+      ([s, t]) => blockAgents.includes(s) && blockAgents.includes(t)
+    );
+
+    // Migrate gate_decisions to block approval
+    let approval: import("./types").BlockApproval | undefined;
+    // Map old gates to blocks
+    const gateMapping: Record<string, string> = {
+      gate_1_build: "research",
+      gate_2_architecture: "development",
+      gate_3_go_nogo: "testing",
+    };
+    for (const [gateName, blockId] of Object.entries(gateMapping)) {
+      if (blockId === defaultBlock.id && state.gate_decisions?.[gateName]) {
+        const gd = state.gate_decisions[gateName]!;
+        approval = {
+          decision: gd.decision === "go" ? "go" : "stop",
+          decided_by: gd.decided_by,
+          timestamp: gd.timestamp,
+          notes: gd.notes,
+        };
+      }
+    }
+
+    blocks.push({
+      ...defaultBlock,
+      agents: blockAgents,
+      edges: blockEdges as [string, string][],
+      ...(approval ? { approval } : {}),
+    });
+  }
+
+  state.blocks = blocks;
+  state.schema_version = 2;
+  return state;
+}
+
 // ============================================================================
 // Чтение состояния
 // ============================================================================
@@ -33,6 +149,13 @@ export function getProjectState(id: string): ProjectState | null {
   if (!fs.existsSync(filePath)) return null;
   const raw = fs.readFileSync(filePath, "utf-8");
   const state = JSON.parse(raw) as ProjectState;
+
+  // Migrate schema v1 → v2 (add blocks)
+  if (!state.blocks || state.schema_version < 2) {
+    migrateToV2(state);
+    const migratedPath = path.join(STATE_DIR, `${id}.json`);
+    fs.writeFileSync(migratedPath, JSON.stringify(state, null, 2), "utf-8");
+  }
 
   // Auto-recover stuck agents: running for >10 min with no process
   let stateChanged = false;
@@ -375,7 +498,20 @@ export function createProject(
     },
     agents: agentsState,
     gate_decisions: {},
-    schema_version: 1,
+    blocks: [
+      {
+        id: "research",
+        name: "Исследование",
+        description: "Анализ проблемы, исследование рынка, формирование продуктового видения",
+        agents: [...STATIC_CHAIN],
+        edges: [
+          ["problem-researcher", "market-researcher"] as [string, string],
+          ["market-researcher", "product-owner"] as [string, string],
+        ],
+        requires_approval: true,
+      },
+    ],
+    schema_version: 2,
   };
 
   // Сохраняем state JSON
@@ -2724,6 +2860,189 @@ export function removeAgentFromPipeline(id: string, agentId: string): {
   saveProjectState(id, state);
 
   return { ok: true };
+}
+
+// ============================================================================
+// Block CRUD operations
+// ============================================================================
+
+export function resolveBlockApproval(
+  id: string,
+  blockId: string,
+  decision: "go" | "stop",
+  notes?: string
+): boolean {
+  const state = getProjectState(id);
+  if (!state) return false;
+
+  const block = state.blocks?.find((b) => b.id === blockId);
+  if (!block) return false;
+
+  block.approval = {
+    decision,
+    decided_by: "human",
+    timestamp: new Date().toISOString(),
+    notes,
+  };
+
+  if (decision === "stop") {
+    state.status = "stopped";
+    // Mark remaining pending agents as skipped
+    for (const agent of Object.values(state.agents)) {
+      if (agent.status === "pending") agent.status = "skipped";
+    }
+  } else {
+    state.status = "running";
+  }
+
+  state.current_gate = null;
+  state.updated_at = new Date().toISOString();
+  const filePath = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  return true;
+}
+
+export function addBlock(
+  id: string,
+  name: string,
+  description?: string,
+  requiresApproval: boolean = true,
+  afterBlockId?: string
+): boolean {
+  const state = getProjectState(id);
+  if (!state || !state.blocks) return false;
+
+  const blockId = name.toLowerCase().replace(/[^a-zа-яё0-9]+/gi, "-").replace(/^-|-$/g, "") || `block-${Date.now()}`;
+
+  const newBlock: import("./types").PipelineBlock = {
+    id: blockId,
+    name,
+    description,
+    agents: [],
+    edges: [],
+    requires_approval: requiresApproval,
+  };
+
+  if (afterBlockId) {
+    const idx = state.blocks.findIndex((b) => b.id === afterBlockId);
+    if (idx >= 0) {
+      state.blocks.splice(idx + 1, 0, newBlock);
+    } else {
+      state.blocks.push(newBlock);
+    }
+  } else {
+    state.blocks.push(newBlock);
+  }
+
+  state.updated_at = new Date().toISOString();
+  const filePath = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  return true;
+}
+
+export function removeBlock(id: string, blockId: string): boolean {
+  const state = getProjectState(id);
+  if (!state || !state.blocks) return false;
+
+  const idx = state.blocks.findIndex((b) => b.id === blockId);
+  if (idx < 0) return false;
+
+  state.blocks.splice(idx, 1);
+  state.updated_at = new Date().toISOString();
+  const filePath = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  return true;
+}
+
+export function updateBlock(
+  id: string,
+  blockId: string,
+  updates: { name?: string; description?: string; requires_approval?: boolean }
+): boolean {
+  const state = getProjectState(id);
+  if (!state || !state.blocks) return false;
+
+  const block = state.blocks.find((b) => b.id === blockId);
+  if (!block) return false;
+
+  if (updates.name !== undefined) block.name = updates.name;
+  if (updates.description !== undefined) block.description = updates.description;
+  if (updates.requires_approval !== undefined) block.requires_approval = updates.requires_approval;
+
+  state.updated_at = new Date().toISOString();
+  const filePath = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  return true;
+}
+
+export function reorderBlocks(id: string, blockIds: string[]): boolean {
+  const state = getProjectState(id);
+  if (!state || !state.blocks) return false;
+
+  const blockMap = new Map(state.blocks.map((b) => [b.id, b]));
+  const reordered: import("./types").PipelineBlock[] = [];
+  for (const bid of blockIds) {
+    const block = blockMap.get(bid);
+    if (block) reordered.push(block);
+  }
+  // Add any blocks not in the provided order
+  for (const block of state.blocks) {
+    if (!blockIds.includes(block.id)) reordered.push(block);
+  }
+
+  state.blocks = reordered;
+  state.updated_at = new Date().toISOString();
+  const filePath = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  return true;
+}
+
+export function addAgentToBlock(id: string, blockId: string, agentId: string): boolean {
+  const state = getProjectState(id);
+  if (!state || !state.blocks) return false;
+
+  const block = state.blocks.find((b) => b.id === blockId);
+  if (!block) return false;
+  if (block.agents.includes(agentId)) return true; // already there
+
+  block.agents.push(agentId);
+
+  // Add to pipeline_graph if not there
+  if (!state.pipeline_graph.nodes.includes(agentId)) {
+    state.pipeline_graph.nodes.push(agentId);
+  }
+
+  // Initialize agent state if needed
+  if (!state.agents[agentId]) {
+    state.agents[agentId] = {
+      status: "pending",
+      started_at: null,
+      completed_at: null,
+      artifacts: [],
+      error: null,
+    };
+  }
+
+  state.updated_at = new Date().toISOString();
+  const filePath = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  return true;
+}
+
+export function removeAgentFromBlock(id: string, blockId: string, agentId: string): boolean {
+  const state = getProjectState(id);
+  if (!state || !state.blocks) return false;
+
+  const block = state.blocks.find((b) => b.id === blockId);
+  if (!block) return false;
+
+  block.agents = block.agents.filter((a) => a !== agentId);
+  block.edges = block.edges.filter(([s, t]) => s !== agentId && t !== agentId);
+
+  state.updated_at = new Date().toISOString();
+  const filePath = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  return true;
 }
 
 // ============================================================================
