@@ -1580,7 +1580,167 @@ function parseAutoFeedback(
     } catch { /* unreadable file */ }
   }
 
+  // FALLBACK: if no json:feedback found, extract issues from text
+  if (results.length === 0) {
+    console.log(`[parseAutoFeedback] No json:feedback block found for ${agentId}, trying text extraction`);
+    const allContent = mdFiles
+      .map((f) => { try { return fs.readFileSync(f, "utf-8"); } catch { return ""; } })
+      .join("\n");
+    const textResults = extractFeedbackFromText(agentId, allContent);
+    if (textResults.length > 0) {
+      console.log(`[parseAutoFeedback] Text extraction found ${textResults.length} issues for ${agentId}`);
+      results.push(...textResults);
+    }
+  }
+
   return results;
+}
+
+/**
+ * Fallback: extract critical/high issues from plain text report.
+ * Matches patterns like:
+ *   - "Critical: ...", "High: ...", "🔴 CRITICAL", "BUG-001 (Critical)"
+ *   - "SEC-001", "BUG-001", "FINDING-001"
+ * Routes to target agent based on file paths or keywords in the description.
+ */
+function extractFeedbackFromText(
+  fromAgent: string,
+  content: string
+): { to_agent: string; severity: string; description: string }[] {
+  const results: { to_agent: string; severity: string; description: string }[] = [];
+
+  // Patterns for issue lines with severity
+  const issuePatterns = [
+    // ### SEC-001: Description (Critical)  or  ### BUG-001: Description (High)
+    /###\s*(?:BUG|SEC|FINDING|VULN|DEF|ISSUE)[-_](\d+):\s*(.+?)\s*\((critical|high)\)/gi,
+    // BUG-001 (Critical): description
+    /(?:BUG|SEC|FINDING|VULN|DEF|ISSUE)[-_](\d+)\s*[:\(]\s*(critical|high)\)?[:\s]+(.+)/gi,
+    // | BUG-001 | Critical | description | file |
+    /\|\s*(?:BUG|SEC|FINDING|VULN|DEF|ISSUE)[-_]\d+\s*\|\s*(critical|high)\s*\|\s*(.+?)\s*\|/gi,
+    // | **BUG-001** | High | description | file | status |
+    /\|\s*\*{0,2}(?:BUG|SEC|FINDING|VULN|DEF|ISSUE)[-_]\d+\*{0,2}\s*\|\s*(critical|high)\s*\|\s*(.+?)\s*\|/gi,
+    // **Critical**: description  or  **High**: description
+    /\*\*(critical|high)\*\*[:\s]+(.+)/gi,
+    // 🔴 CRITICAL: description  or  🟠 HIGH: description
+    /(?:🔴|🟠)\s*(?:CRITICAL|HIGH)[:\s]+(.+)/gi,
+    // Severity: Critical — description
+    /severity[:\s]+(critical|high)[,\s—\-:]+(.+)/gi,
+  ];
+
+  const seenDescs = new Set<string>();
+
+  // First pass: extract ### SEC-NNN sections with Location context
+  const sectionRegex = /###\s*((?:BUG|SEC|FINDING|VULN|DEF|ISSUE)[-_]\d+):\s*(.+?)\s*\((critical|high)\)\s*\n([\s\S]*?)(?=\n###|\n##[^#]|$)/gi;
+  let sectionMatch;
+  while ((sectionMatch = sectionRegex.exec(content)) !== null) {
+    const id = sectionMatch[1];
+    const title = sectionMatch[2].trim();
+    const severity = sectionMatch[3].toLowerCase();
+    const body = sectionMatch[4];
+
+    // Skip if already fixed
+    if (/✅\s*(?:FIXED|Исправлено|Устранено|Resolved)/i.test(body)) continue;
+
+    // Extract Location
+    const locMatch = body.match(/\*\*Location\*\*:\s*`?([^`\n]+)`?/);
+    const location = locMatch ? locMatch[1].trim() : "";
+
+    const description = `${id}: ${title}${location ? `. Файл: ${location}` : ""}`;
+
+    const key = id.toLowerCase();
+    if (seenDescs.has(key)) continue;
+    seenDescs.add(key);
+
+    // Detect target from location + title
+    const target = detectTargetAgent(description + " " + body.slice(0, 200));
+    results.push({ to_agent: target, severity, description });
+  }
+
+  // Second pass: other patterns (table rows, inline mentions)
+  for (const pattern of issuePatterns) {
+    let match;
+    while ((match = pattern.exec(content)) !== null) {
+      let severity: string;
+      let description: string;
+
+      if (match.length === 4) {
+        severity = (match[3] || match[2]).toLowerCase();
+        description = match[0].trim();
+      } else if (match.length === 3) {
+        severity = match[1].toLowerCase();
+        description = match[0].trim();
+      } else {
+        severity = "high";
+        description = match[0].trim();
+      }
+
+      if (severity !== "critical" && severity !== "high") continue;
+
+      // Skip if marked as fixed
+      if (/✅\s*(?:FIXED|Исправлено|Устранено|Resolved)/i.test(description)) continue;
+
+      description = description.replace(/^\||\|$/g, "").replace(/\*\*/g, "").replace(/^#+\s*/, "").trim();
+      if (description.length < 10 || description.length > 500) continue;
+
+      const key = description.slice(0, 60).toLowerCase();
+      if (seenDescs.has(key)) continue;
+      seenDescs.add(key);
+
+      const target = detectTargetAgent(description);
+      results.push({ to_agent: target, severity, description });
+    }
+  }
+
+  return results;
+}
+
+/** Detect target agent from issue description based on file paths and keywords */
+function detectTargetAgent(description: string): string {
+  const lower = description.toLowerCase();
+
+  // Frontend indicators
+  const frontendPatterns = [
+    /\.(tsx|jsx|css|scss)\b/,
+    /\bcomponent\b/i,
+    /\bfrontend\b/i,
+    /\breact\b/i,
+    /\bnext\.js\b/i,
+    /\blocalstorage\b/i,
+    /\bcookie\b/i,
+    /\bui\b/,
+    /\bform\b/,
+    /\bpage\.tsx\b/,
+    /\bsrc\/app\//,
+    /\bsrc\/components\//,
+    /\bsrc\/lib\//,
+  ];
+
+  // DevOps indicators
+  const devopsPatterns = [
+    /\bdocker/i,
+    /\bnginx/i,
+    /\bci\/cd\b/i,
+    /\bgrafana\b/i,
+    /\bprometheus\b/i,
+    /\btls\b/i,
+    /\bssl\b/i,
+    /\bcertificat/i,
+    /\bhelm\b/i,
+    /\bkubernetes\b/i,
+    /docker-compose/i,
+    /\.ya?ml\b/,
+    /\bredis\b.*\b(password|auth)\b/i,
+  ];
+
+  for (const p of devopsPatterns) {
+    if (p.test(description)) return "devops-engineer";
+  }
+  for (const p of frontendPatterns) {
+    if (p.test(description)) return "frontend-developer";
+  }
+
+  // Default to backend
+  return "backend-developer";
 }
 
 /** Agents that produce auto-feedback (QA, Security, DevOps) */
