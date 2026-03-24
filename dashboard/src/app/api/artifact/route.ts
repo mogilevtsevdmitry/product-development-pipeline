@@ -11,6 +11,7 @@ const PROJECTS_DIR = path.resolve(process.cwd(), "..", "projects");
 export async function GET(req: NextRequest) {
   const projectId = req.nextUrl.searchParams.get("project");
   const artifactPath = req.nextUrl.searchParams.get("path");
+  const runDir = req.nextUrl.searchParams.get("runDir"); // optional: "quality/qa-engineer/runs/001"
 
   if (!projectId || !artifactPath) {
     return NextResponse.json(
@@ -19,8 +20,23 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  // If runDir specified, look for file in run directory first
+  // artifactPath is relative to project (e.g., "quality/qa-engineer/security_report.md")
+  // runDir is e.g., "quality/qa-engineer/runs/001"
+  // We extract the filename from artifactPath and look in runDir
+  let resolved: string;
+  if (runDir) {
+    const fileName = path.basename(artifactPath);
+    resolved = path.resolve(PROJECTS_DIR, projectId, runDir, fileName);
+    // Fallback to original path if not in run dir
+    if (!fs.existsSync(resolved)) {
+      resolved = path.resolve(PROJECTS_DIR, projectId, artifactPath);
+    }
+  } else {
+    resolved = path.resolve(PROJECTS_DIR, projectId, artifactPath);
+  }
+
   // Prevent path traversal
-  const resolved = path.resolve(PROJECTS_DIR, projectId, artifactPath);
   if (!resolved.startsWith(path.resolve(PROJECTS_DIR))) {
     return NextResponse.json({ error: "Invalid path" }, { status: 403 });
   }

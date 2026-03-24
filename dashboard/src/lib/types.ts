@@ -75,6 +75,17 @@ export interface FeedbackItem {
   resolved_at?: string;
 }
 
+export interface AgentRunRecord {
+  run_number: number;
+  started_at: string;
+  completed_at?: string;
+  status: "completed" | "failed" | "running";
+  usage?: AgentUsage | null;
+  error?: string | null;
+  artifacts: string[];              // list of artifact filenames for this run
+  run_dir: string;                  // relative path to run folder (e.g., "runs/001")
+}
+
 export interface AgentState {
   status: AgentStatus;
   started_at?: string | null;
@@ -86,6 +97,8 @@ export interface AgentState {
   total_usage?: AgentUsage | null;  // sum of all runs
   feedback_sent?: FeedbackItem[];     // проблемы, найденные этим агентом
   feedback_received?: FeedbackItem[]; // проблемы, полученные от других агентов
+  run_history?: AgentRunRecord[];     // история всех запусков
+  current_run?: number;               // текущий номер запуска
 }
 
 // --- Pipeline Graph ---

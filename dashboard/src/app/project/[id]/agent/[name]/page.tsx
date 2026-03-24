@@ -7,9 +7,10 @@ import RevisionChat from "@/components/RevisionChat";
 import ReasoningView from "@/components/ReasoningView";
 import FeedbackPanel from "@/components/FeedbackPanel";
 import FeedbackReceivedBlock from "@/components/FeedbackReceivedBlock";
-import type { ProjectState, AgentStatus } from "@/lib/types";
+import RunHistoryView from "@/components/RunHistoryView";
+import type { ProjectState, AgentStatus, AgentRunRecord } from "@/lib/types";
 
-type Tab = "overview" | "reasoning";
+type Tab = "overview" | "reasoning" | "history";
 
 // Agent display names
 const AGENT_LABELS: Record<string, string> = {
@@ -240,6 +241,18 @@ export default function AgentDetailPage({
             <span className="ml-1.5 w-1.5 h-1.5 rounded-full bg-purple-400 inline-block" />
           )}
         </button>
+        {(agent.run_history && agent.run_history.length > 0) && (
+          <button
+            onClick={() => setTab("history")}
+            className={`px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors ${
+              tab === "history"
+                ? "bg-gray-800 text-white border-b-2 border-amber-500"
+                : "text-gray-500 hover:text-gray-300 hover:bg-gray-800/50"
+            }`}
+          >
+            📜 История ({agent.run_history.length})
+          </button>
+        )}
       </div>
 
       {/* Tab: Reasoning */}
@@ -248,6 +261,16 @@ export default function AgentDetailPage({
           projectId={state.project_id}
           agentId={agentKey}
           agentStatus={agent.status}
+          phase={AGENT_PHASES[agentKey]?.toLowerCase() || "other"}
+        />
+      )}
+
+      {/* Tab: History */}
+      {tab === "history" && agent.run_history && (
+        <RunHistoryView
+          projectId={state.project_id}
+          agentId={agentKey}
+          runHistory={agent.run_history}
           phase={AGENT_PHASES[agentKey]?.toLowerCase() || "other"}
         />
       )}

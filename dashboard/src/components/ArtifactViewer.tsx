@@ -7,13 +7,15 @@ import remarkGfm from "remark-gfm";
 interface ArtifactViewerProps {
   projectId: string;
   artifactPath: string;
-  onClose: () => void;
+  onClose?: () => void;
+  runDir?: string;  // e.g. "quality/qa-engineer/runs/001" — load from run folder instead
 }
 
 export default function ArtifactViewer({
   projectId,
   artifactPath,
   onClose,
+  runDir,
 }: ArtifactViewerProps) {
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -26,7 +28,7 @@ export default function ArtifactViewer({
   const loadContent = useCallback(async () => {
     try {
       const res = await fetch(
-        `/api/artifact?project=${encodeURIComponent(projectId)}&path=${encodeURIComponent(artifactPath)}`
+        `/api/artifact?project=${encodeURIComponent(projectId)}&path=${encodeURIComponent(artifactPath)}${runDir ? `&runDir=${encodeURIComponent(runDir)}` : ""}`
       );
       if (!res.ok) {
         setError("Файл не найден");
@@ -87,7 +89,7 @@ export default function ArtifactViewer({
               ↙ Свернуть
             </button>
             <button
-              onClick={onClose}
+              onClick={() => onClose?.()}
               className="px-3 py-1.5 text-xs text-gray-400 hover:text-white border border-gray-700 rounded-lg hover:bg-gray-800 transition-colors"
             >
               ✕ Закрыть
@@ -138,7 +140,7 @@ export default function ArtifactViewer({
             ↗ Развернуть
           </button>
           <button
-            onClick={onClose}
+            onClick={() => onClose?.()}
             className="px-2 py-1 text-xs text-gray-500 hover:text-white border border-gray-700 rounded hover:bg-gray-800 transition-colors"
           >
             ✕

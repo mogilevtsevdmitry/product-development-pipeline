@@ -71,12 +71,60 @@ export function getProjectState(id: string): ProjectState | null {
       agent.status = "completed";
       agent.completed_at = new Date(latestMtime).toISOString();
       agent.artifacts = collectArtifacts(outDir, projectDir);
+      agent.error = null;
       stateChanged = true;
+
+      // Read usage from _usage.json if available
+      const usageFile = path.join(outDir, "_usage.json");
+      if (fs.existsSync(usageFile)) {
+        try {
+          const usage = JSON.parse(fs.readFileSync(usageFile, "utf-8"));
+          if (usage && !agent.usage_history?.some((u: any) => u.duration_ms === usage.duration_ms && u.input_tokens === usage.input_tokens)) {
+            agent.usage = usage;
+            if (!agent.usage_history) agent.usage_history = [];
+            agent.usage_history.push(usage);
+            const history = agent.usage_history;
+            agent.total_usage = {
+              input_tokens: history.reduce((s: number, u: any) => s + u.input_tokens, 0),
+              output_tokens: history.reduce((s: number, u: any) => s + u.output_tokens, 0),
+              cache_creation_tokens: history.reduce((s: number, u: any) => s + (u.cache_creation_tokens || 0), 0),
+              cache_read_tokens: history.reduce((s: number, u: any) => s + (u.cache_read_tokens || 0), 0),
+              cost_usd: history.reduce((s: number, u: any) => s + u.cost_usd, 0),
+              duration_ms: history.reduce((s: number, u: any) => s + u.duration_ms, 0),
+              model: usage.model,
+            };
+          }
+        } catch { /* ignore */ }
+      }
+
+      // Mark received feedback as resolved
+      if (agent.feedback_received?.length) {
+        const now = new Date().toISOString();
+        for (const fb of agent.feedback_received) {
+          if (!fb.resolved) {
+            fb.resolved = true;
+            fb.resolved_at = now;
+          }
+        }
+      }
 
       // If this was pipeline-architect — expand the graph
       if (agentId === "pipeline-architect" && state.pipeline_graph.nodes.length <= 5) {
         console.log("[Auto-recovery] PA completed, expanding pipeline graph");
         expandPipelineFromArchitect(state, id);
+      }
+
+      // Auto-feedback: QA/Security/DevOps — parse and apply feedback
+      if (FEEDBACK_AGENTS.has(agentId)) {
+        const feedbackItems = parseAutoFeedback(agentId, outDir);
+        if (feedbackItems.length > 0) {
+          console.log(`[Auto-recovery] ${agentId} produced ${feedbackItems.length} feedback items`);
+          const anyReset = applyAutoFeedback(state, id, agentId, feedbackItems);
+          if (anyReset) {
+            console.log(`[Auto-recovery] Target agents reset to pending`);
+            state.status = "running";
+          }
+        }
       }
     } else {
       // No output — check if process is still alive
@@ -115,6 +163,26 @@ export function getProjectState(id: string): ProjectState | null {
   if (stateChanged) {
     state.updated_at = new Date().toISOString();
     fs.writeFileSync(filePath, JSON.stringify(state, null, 2));
+
+    // Auto-launch pending agents that were reset by feedback
+    if (state.status === "running" && state.mode === "auto") {
+      const readyToLaunch = findReadyAgents(state);
+      if (readyToLaunch.length > 0) {
+        console.log(`[Auto-recovery] Launching ready agents: ${readyToLaunch.join(", ")}`);
+        for (const nextAgent of readyToLaunch) {
+          if (state.agents[nextAgent]?.status === "pending") {
+            state.agents[nextAgent].status = "running";
+            state.agents[nextAgent].started_at = new Date().toISOString();
+            state.agents[nextAgent].error = null;
+          }
+        }
+        state.updated_at = new Date().toISOString();
+        fs.writeFileSync(filePath, JSON.stringify(state, null, 2));
+        for (const nextAgent of readyToLaunch) {
+          spawnAgent(id, nextAgent, state);
+        }
+      }
+    }
   }
 
   return state;
@@ -1421,9 +1489,11 @@ function parseAutoFeedback(
       let match;
       while ((match = feedbackRegex.exec(content)) !== null) {
         try {
-          const items = JSON.parse(match[1]);
-          if (Array.isArray(items)) {
-            for (const item of items) {
+          const parsed = JSON.parse(match[1]);
+
+          // Format 1: Array of {to_agent, severity, description}
+          if (Array.isArray(parsed)) {
+            for (const item of parsed) {
               if (item.to_agent && item.severity && item.description) {
                 results.push({
                   to_agent: item.to_agent,
@@ -1432,6 +1502,30 @@ function parseAutoFeedback(
                 });
               }
             }
+          }
+          // Format 2: Object with {targets: [{agent, priority, findings, actions}]}
+          else if (parsed.targets && Array.isArray(parsed.targets)) {
+            for (const target of parsed.targets) {
+              const toAgent = target.agent || target.to_agent;
+              const severity = target.priority || target.severity || "high";
+              if (!toAgent) continue;
+              const actions = Array.isArray(target.actions) ? target.actions : [];
+              const findings = Array.isArray(target.findings) ? target.findings : [];
+              const desc = actions.length > 0
+                ? actions.map((a: string, i: number) => `${findings[i] || `ITEM-${i+1}`}: ${a}`).join("\n")
+                : target.description || findings.join(", ");
+              if (desc) {
+                results.push({ to_agent: toAgent, severity, description: desc });
+              }
+            }
+          }
+          // Format 3: Single object with {to_agent, severity, description}
+          else if (parsed.to_agent && parsed.severity && parsed.description) {
+            results.push({
+              to_agent: parsed.to_agent,
+              severity: parsed.severity,
+              description: parsed.description,
+            });
           }
         } catch {
           console.warn(`[parseAutoFeedback] Failed to parse feedback JSON in ${path.basename(filePath)}`);
@@ -1539,6 +1633,7 @@ function finalizeAgent(
   const phase = AGENT_PHASES[agentId] || "other";
   const outputDir = path.join(PROJECTS_DIR, id, phase, agentId);
   const projectDir = path.join(PROJECTS_DIR, id);
+  let feedbackResetOccurred = false;
 
   if (success) {
     state.agents[agentId].status = "completed";
@@ -1600,6 +1695,7 @@ function finalizeAgent(
         console.log(`[AutoFeedback] ${agentId} produced ${feedbackItems.length} feedback items`);
         const anyReset = applyAutoFeedback(state, id, agentId, feedbackItems);
         if (anyReset) {
+          feedbackResetOccurred = true;
           console.log(`[AutoFeedback] Target agents reset, will auto-launch after state save`);
         }
       }
@@ -1634,6 +1730,37 @@ function finalizeAgent(
   state.agents[agentId].completed_at = new Date().toISOString();
   state.updated_at = new Date().toISOString();
 
+  // Save run history record
+  const currentRunNum = state.agents[agentId].current_run || 1;
+  const runDirRel = `runs/${String(currentRunNum).padStart(3, "0")}`;
+  const runDirAbs = path.join(outputDir, runDirRel);
+  const runRecord: import("./types").AgentRunRecord = {
+    run_number: currentRunNum,
+    started_at: state.agents[agentId].started_at || new Date().toISOString(),
+    completed_at: state.agents[agentId].completed_at!,
+    status: success ? "completed" : "failed",
+    usage: usage || undefined,
+    error: success ? undefined : (errorMsg || "Неизвестная ошибка"),
+    artifacts: state.agents[agentId].artifacts,
+    run_dir: runDirRel,
+  };
+  if (!state.agents[agentId].run_history) state.agents[agentId].run_history = [];
+  state.agents[agentId].run_history!.push(runRecord);
+
+  // Copy output artifacts to run directory
+  try {
+    if (fs.existsSync(runDirAbs)) {
+      for (const f of fs.readdirSync(outputDir)) {
+        if (f === "runs" || f.startsWith("_") && f !== "_reasoning.md" && f !== "_prompt.md" && f !== "_usage.json" && f !== "_model.txt") continue;
+        const src = path.join(outputDir, f);
+        const dst = path.join(runDirAbs, f);
+        if (fs.statSync(src).isFile()) {
+          fs.copyFileSync(src, dst);
+        }
+      }
+    }
+  } catch { /* ignore copy errors */ }
+
   if (!success) {
     state.status = "failed";
   } else {
@@ -1642,6 +1769,9 @@ function finalizeAgent(
     if (gate) {
       state.status = "paused_at_gate";
       state.current_gate = gate;
+    } else if (feedbackResetOccurred) {
+      // Feedback reset some agents to pending — pipeline is still running
+      state.status = "running";
     } else {
       // Check pipeline completion
       const allDone = state.pipeline_graph.nodes.every((n) => {
@@ -1655,8 +1785,9 @@ function finalizeAgent(
   const fp = path.join(STATE_DIR, `${id}.json`);
   fs.writeFileSync(fp, JSON.stringify(state, null, 2), "utf-8");
 
-  // Auto-launch agents that were reset by feedback (in auto mode)
-  if (success && state.mode === "auto" && state.status === "running") {
+  // Auto-launch agents that were reset by feedback
+  // Works in auto mode, OR when feedback reset occurred (even in human_approval)
+  if (success && (state.status === "running" || feedbackResetOccurred) && (state.mode === "auto" || feedbackResetOccurred)) {
     const readyToLaunch = findReadyAgents(state);
     if (readyToLaunch.length > 0) {
       console.log(`[AutoLaunch] After ${agentId}: launching ${readyToLaunch.join(", ")}`);
@@ -1782,12 +1913,28 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
   const phase = AGENT_PHASES[agentId] || "other";
   const outputDir = path.join(PROJECTS_DIR, id, phase, agentId);
   fs.mkdirSync(outputDir, { recursive: true });
+
+  // Create run directory: runs/001, runs/002, etc.
+  const runsDir = path.join(outputDir, "runs");
+  fs.mkdirSync(runsDir, { recursive: true });
+  const existingRuns = fs.readdirSync(runsDir).filter(d => /^\d{3}$/.test(d)).sort();
+  const nextRunNum = existingRuns.length > 0 ? parseInt(existingRuns[existingRuns.length - 1]) + 1 : 1;
+  const runId = String(nextRunNum).padStart(3, "0");
+  const runDir = path.join(runsDir, runId);
+  fs.mkdirSync(runDir, { recursive: true });
+
+  // Track current run in state
+  if (!state.agents[agentId].run_history) state.agents[agentId].run_history = [];
+  state.agents[agentId].current_run = nextRunNum;
+
   const tmpFile = prepareAgentPrompt(agentId, state, outputDir);
 
   // Save the prompt as _prompt.md so we can view it later (reasoning tab)
   const promptContent = fs.readFileSync(tmpFile, "utf-8");
   const promptLogFile = path.join(outputDir, "_prompt.md");
   fs.writeFileSync(promptLogFile, promptContent, "utf-8");
+  // Also save to run dir
+  fs.writeFileSync(path.join(runDir, "_prompt.md"), promptContent, "utf-8");
 
   const startTime = Date.now();
 
@@ -1979,6 +2126,15 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
 
     const logFile = path.join(outputDir, "_reasoning.md");
     fs.writeFileSync(logFile, logParts.join("\n"), "utf-8");
+
+    // Copy key files to run directory for history
+    try {
+      fs.writeFileSync(path.join(runDir, "_reasoning.md"), logParts.join("\n"), "utf-8");
+      if (usageData) {
+        fs.writeFileSync(path.join(runDir, "_usage.json"), JSON.stringify(usageData, null, 2), "utf-8");
+      }
+      fs.writeFileSync(path.join(runDir, "_model.txt"), fs.readFileSync(path.join(outputDir, "_model.txt"), "utf-8"), "utf-8");
+    } catch { /* ignore copy errors */ }
 
     // Check for rate limit / auth errors before finalizing
     const allOutput = (stderr + " " + stdout + " " + resultText).toLowerCase();
