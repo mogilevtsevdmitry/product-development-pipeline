@@ -1583,13 +1583,17 @@ function applyAutoFeedback(
     if (!target) continue;
 
     // Check iteration count to prevent infinite loops
+    // Count unique feedback CYCLES (by resolved_at timestamp), not individual items
     const existingFeedback = target.feedback_received || [];
-    const iterationsFromSameAgent = existingFeedback.filter(
-      (f) => f.from_agent === fromAgent && f.resolved
-    ).length;
+    const resolvedTimestamps = new Set(
+      existingFeedback
+        .filter((f) => f.from_agent === fromAgent && f.resolved && f.resolved_at)
+        .map((f) => f.resolved_at)
+    );
+    const iterationCycles = resolvedTimestamps.size;
 
-    if (iterationsFromSameAgent >= MAX_FEEDBACK_ITERATIONS) {
-      console.log(`[AutoFeedback] Max iterations (${MAX_FEEDBACK_ITERATIONS}) reached for ${fromAgent} → ${targetAgent}, skipping`);
+    if (iterationCycles >= MAX_FEEDBACK_ITERATIONS) {
+      console.log(`[AutoFeedback] Max iterations (${MAX_FEEDBACK_ITERATIONS} cycles) reached for ${fromAgent} → ${targetAgent}, skipping`);
       continue;
     }
 
