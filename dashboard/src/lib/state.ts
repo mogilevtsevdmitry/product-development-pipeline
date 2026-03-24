@@ -66,7 +66,9 @@ export function getProjectState(id: string): ProjectState | null {
       }
     }
 
-    if (hasOutput) {
+    // Only count output as valid if files were modified AFTER agent started
+    const startedAtMs = new Date(agent.started_at).getTime();
+    if (hasOutput && latestMtime > startedAtMs) {
       // Agent completed but callback was lost — recover
       agent.status = "completed";
       agent.completed_at = new Date(latestMtime).toISOString();
@@ -127,7 +129,7 @@ export function getProjectState(id: string): ProjectState | null {
         }
       }
     } else {
-      // No output — check if process is still alive
+      // No new output (or stale files from previous run) — check if process is still alive
       const pidFile = path.join(outDir, "_pid");
       let processAlive = false;
       if (fs.existsSync(pidFile)) {
