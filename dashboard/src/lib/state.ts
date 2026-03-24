@@ -2500,19 +2500,27 @@ export function restartAgent(id: string, agentId: string): boolean {
   const agent = state.agents[agentId];
   if (!agent) return false;
 
-  agent.status = "pending";
-  agent.started_at = null;
+  // Kill existing process if running
+  if (agent.status === "running") {
+    killAgent(id, agentId);
+  }
+
+  agent.status = "running";
+  agent.started_at = new Date().toISOString();
   agent.completed_at = null;
-  agent.artifacts = [];
   agent.error = null;
 
-  if (state.status === "failed" || state.status === "stopped") {
+  // Ensure pipeline is running
+  if (state.status !== "running") {
     state.status = "running";
   }
 
   state.updated_at = new Date().toISOString();
   const filePath = path.join(STATE_DIR, `${id}.json`);
   fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+
+  // Actually spawn the agent
+  spawnAgent(id, agentId, state);
   return true;
 }
 
