@@ -99,6 +99,21 @@ export function getProjectState(id: string): ProjectState | null {
         } catch { /* ignore */ }
       }
 
+      // Add run_history record for auto-recovered agent
+      if (!agent.run_history) agent.run_history = [];
+      const runNum = (agent.current_run || agent.run_history.length) + 1;
+      agent.current_run = runNum;
+      agent.run_history.push({
+        run_number: runNum,
+        started_at: agent.started_at || new Date().toISOString(),
+        completed_at: agent.completed_at!,
+        status: "completed" as const,
+        usage: agent.usage || undefined,
+        error: undefined,
+        artifacts: agent.artifacts,
+        run_dir: `runs/${String(runNum).padStart(3, "0")}`,
+      });
+
       // Mark received feedback as resolved
       if (agent.feedback_received?.length) {
         const now = new Date().toISOString();
