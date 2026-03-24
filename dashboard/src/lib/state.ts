@@ -160,6 +160,18 @@ export function getProjectState(id: string): ProjectState | null {
     stateChanged = true;
   }
 
+  // Fix stale "running" status: if all agents done but pipeline still shows running
+  if (state.status === "running" && state.pipeline_graph.nodes.length > 0) {
+    const allDone = state.pipeline_graph.nodes.every((n) => {
+      const s = state.agents[n]?.status;
+      return s === "completed" || s === "skipped";
+    });
+    if (allDone) {
+      state.status = "completed";
+      stateChanged = true;
+    }
+  }
+
   if (stateChanged) {
     state.updated_at = new Date().toISOString();
     fs.writeFileSync(filePath, JSON.stringify(state, null, 2));
