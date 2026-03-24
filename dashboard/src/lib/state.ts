@@ -1548,7 +1548,24 @@ function parseAutoFeedback(
               }
             }
           }
-          // Format 3: Single object with {to_agent, severity, description}
+          // Format 3: Object with {findings: [{id, severity, target, title, action}]}
+          else if (parsed.findings && Array.isArray(parsed.findings)) {
+            for (const f of parsed.findings) {
+              const toAgent = f.target || f.to_agent;
+              const severity = f.severity || "high";
+              if (!toAgent) continue;
+              const parts = [];
+              if (f.id) parts.push(f.id);
+              if (f.title) parts.push(f.title);
+              if (f.file) parts.push(`Файл: ${f.file}`);
+              if (f.action) parts.push(`Действие: ${f.action}`);
+              const desc = parts.join(": ") || f.description || "";
+              if (desc) {
+                results.push({ to_agent: toAgent, severity, description: desc });
+              }
+            }
+          }
+          // Format 4: Single object with {to_agent, severity, description}
           else if (parsed.to_agent && parsed.severity && parsed.description) {
             results.push({
               to_agent: parsed.to_agent,
