@@ -59,6 +59,21 @@ const AGENT_PHASES: Record<string, string> = {
   "customer-support": "Фидбек",
   "data-analyst": "Фидбек",
   orchestrator: "Мета",
+  "trend-researcher": "Контент",
+  "catalog-analyst": "Контент",
+  "content-strategist": "Контент",
+  "post-writer": "Контент",
+  "script-writer": "Контент",
+  "story-writer": "Контент",
+  "image-generator": "Контент",
+  "video-generator": "Контент",
+  "music-composer": "Контент",
+  "content-assembler": "Контент",
+  "quality-checker": "Контент",
+  "telegram-poster": "Контент",
+  "instagram-poster": "Контент",
+  "youtube-poster": "Контент",
+  "analytics-collector": "Контент",
 };
 
 function formatDate(iso?: string | null): string {

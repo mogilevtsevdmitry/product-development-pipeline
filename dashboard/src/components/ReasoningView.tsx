@@ -14,6 +14,7 @@ const PHASE_MAP: Record<string, string> = {
   релиз: "release",
   маркетинг: "marketing",
   фидбек: "feedback",
+  контент: "content",
 };
 
 interface Props {

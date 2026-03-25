@@ -48,6 +48,21 @@ const AGENT_LABELS: Record<string, string> = {
   "customer-support": "Customer Support",
   "data-analyst": "Data Analyst",
   orchestrator: "Orchestrator",
+  "trend-researcher": "Trend Researcher",
+  "catalog-analyst": "Catalog Analyst",
+  "content-strategist": "Content Strategist",
+  "post-writer": "Post Writer",
+  "script-writer": "Script Writer",
+  "story-writer": "Story Writer",
+  "image-generator": "Image Generator",
+  "video-generator": "Video Generator",
+  "music-composer": "Music Composer",
+  "content-assembler": "Content Assembler",
+  "quality-checker": "Quality Checker",
+  "telegram-poster": "Telegram Poster",
+  "instagram-poster": "Instagram Poster",
+  "youtube-poster": "YouTube Poster",
+  "analytics-collector": "Analytics Collector",
 };
 
 // Agent phase mapping
@@ -73,6 +88,21 @@ const AGENT_PHASES: Record<string, string> = {
   "customer-support": "feedback",
   "data-analyst": "feedback",
   orchestrator: "meta",
+  "trend-researcher": "content",
+  "catalog-analyst": "content",
+  "content-strategist": "content",
+  "post-writer": "content",
+  "script-writer": "content",
+  "story-writer": "content",
+  "image-generator": "content",
+  "video-generator": "content",
+  "music-composer": "content",
+  "content-assembler": "content",
+  "quality-checker": "content",
+  "telegram-poster": "content",
+  "instagram-poster": "content",
+  "youtube-poster": "content",
+  "analytics-collector": "content",
 };
 
 const PHASE_ORDER = [
@@ -86,6 +116,7 @@ const PHASE_ORDER = [
   "release",
   "marketing",
   "feedback",
+  "content",
 ];
 
 /**
