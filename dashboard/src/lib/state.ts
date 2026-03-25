@@ -499,16 +499,27 @@ export function createProject(
     }
   }
 
-  // Начальное состояние — только статическая цепочка
+  // Initialize all agents from all default blocks
   const agentsState: Record<string, import("./types").AgentState> = {};
-  for (const agentId of STATIC_CHAIN) {
-    agentsState[agentId] = {
-      status: "pending" as const,
-      started_at: null,
-      completed_at: null,
-      artifacts: [],
-      error: null,
-    };
+  const allAgentIds: string[] = [];
+  const allEdges: [string, string][] = [];
+
+  for (const block of DEFAULT_BLOCKS) {
+    for (const agentId of block.agents) {
+      if (!agentsState[agentId]) {
+        agentsState[agentId] = {
+          status: "pending" as const,
+          started_at: null,
+          completed_at: null,
+          artifacts: [],
+          error: null,
+        };
+        allAgentIds.push(agentId);
+      }
+    }
+    for (const edge of block.edges) {
+      allEdges.push(edge as [string, string]);
+    }
   }
 
   const state: ProjectState = {
@@ -522,29 +533,13 @@ export function createProject(
     status: "created",
     current_gate: null,
     pipeline_graph: {
-      nodes: [...STATIC_CHAIN],
-      edges: [
-        ["problem-researcher", "market-researcher"],
-        ["market-researcher", "product-owner"],
-      ],
+      nodes: allAgentIds,
+      edges: allEdges,
       parallel_groups: [],
     },
     agents: agentsState,
     gate_decisions: {},
-    blocks: [
-      {
-        id: "research",
-        name: "Исследование",
-        description: "Анализ проблемы, исследование рынка, формирование продуктового видения",
-        agents: [...STATIC_CHAIN],
-        edges: [
-          ["problem-researcher", "market-researcher"] as [string, string],
-          ["market-researcher", "product-owner"] as [string, string],
-        ],
-        requires_approval: true,
-        depends_on: [] as string[],
-      },
-    ],
+    blocks: DEFAULT_BLOCKS.map((b) => ({ ...b })),
     schema_version: 2,
     current_cycle: 1,
     cycle_history: [],
