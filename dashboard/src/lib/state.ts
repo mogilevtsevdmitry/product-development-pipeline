@@ -1383,22 +1383,36 @@ function prepareAgentPrompt(
   try { systemPrompt = fs.readFileSync(path.join(agentDir, "system-prompt.md"), "utf-8"); } catch { /* */ }
   try { rules = fs.readFileSync(path.join(agentDir, "rules.md"), "utf-8"); } catch { /* */ }
 
-  // Load skills: shared (for all agents) + agent-specific
+  // Load skills: shared (only for code agents) + agent-specific
   let skillsContent = "";
-  const sharedSkillsDir = path.join(AGENTS_DIR, "shared", "skills");
   const agentSkillsDir = path.join(agentDir, "skills");
-  for (const skillDir of [sharedSkillsDir, agentSkillsDir]) {
+
+  // Shared skills (model-selector, test-infrastructure) only for code agents
+  if (CODE_AGENTS.has(agentId)) {
+    const sharedSkillsDir = path.join(AGENTS_DIR, "shared", "skills");
     try {
-      if (fs.existsSync(skillDir)) {
-        for (const file of fs.readdirSync(skillDir)) {
+      if (fs.existsSync(sharedSkillsDir)) {
+        for (const file of fs.readdirSync(sharedSkillsDir)) {
           if (file.endsWith(".md")) {
-            const content = fs.readFileSync(path.join(skillDir, file), "utf-8");
+            const content = fs.readFileSync(path.join(sharedSkillsDir, file), "utf-8");
             skillsContent += `\n\n---\n${content}`;
           }
         }
       }
     } catch { /* */ }
   }
+
+  // Agent-specific skills (always loaded)
+  try {
+    if (fs.existsSync(agentSkillsDir)) {
+      for (const file of fs.readdirSync(agentSkillsDir)) {
+        if (file.endsWith(".md")) {
+          const content = fs.readFileSync(path.join(agentSkillsDir, file), "utf-8");
+          skillsContent += `\n\n---\n${content}`;
+        }
+      }
+    }
+  } catch { /* */ }
 
   const context = collectInputContext(agentId, state);
 
