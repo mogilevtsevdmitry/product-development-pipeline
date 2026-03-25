@@ -13,7 +13,7 @@ interface BlockSidebarProps {
   agents: Record<string, AgentState>;
   selectedBlockId: string | null;
   onSelectBlock: (id: string) => void;
-  onAddBlock: () => void;
+  onAddBlock: (name: string, description?: string, requiresApproval?: boolean) => void;
   onReorderBlocks: (blockIds: string[]) => void;
   onEditBlock?: (id: string) => void;
   onDeleteBlock?: (id: string) => void;
@@ -95,16 +95,85 @@ export default function BlockSidebar({
   onDeleteBlock,
 }: BlockSidebarProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newBlockName, setNewBlockName] = useState("");
+  const [newBlockDesc, setNewBlockDesc] = useState("");
+  const [newBlockApproval, setNewBlockApproval] = useState(true);
 
   const blockStatuses = computeAllBlockStatuses(blocks, agents);
 
+  const handleAddBlock = () => {
+    if (!newBlockName.trim()) return;
+    onAddBlock(newBlockName.trim(), newBlockDesc.trim() || undefined, newBlockApproval);
+    setNewBlockName("");
+    setNewBlockDesc("");
+    setNewBlockApproval(true);
+    setShowAddForm(false);
+  };
+
   return (
     <aside className="w-72 bg-gray-950 border-r border-gray-800 flex flex-col h-full">
-      <div className="px-4 py-3 border-b border-gray-800">
+      <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">
-          Блоки пайплайна
+          Блоки
         </h2>
+        <button
+          onClick={() => setShowAddForm(!showAddForm)}
+          className="w-6 h-6 rounded-md flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
+          title="Добавить блок"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
+            <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </button>
       </div>
+
+      {/* Add block form */}
+      {showAddForm && (
+        <div className="px-3 py-3 border-b border-gray-800 space-y-2">
+          <input
+            type="text"
+            value={newBlockName}
+            onChange={(e) => setNewBlockName(e.target.value)}
+            placeholder="Название блока"
+            className="w-full bg-gray-900 border border-gray-700 rounded-md px-2.5 py-1.5 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
+            autoFocus
+            onKeyDown={(e) => e.key === "Enter" && handleAddBlock()}
+          />
+          <input
+            type="text"
+            value={newBlockDesc}
+            onChange={(e) => setNewBlockDesc(e.target.value)}
+            placeholder="Описание (необязательно)"
+            className="w-full bg-gray-900 border border-gray-700 rounded-md px-2.5 py-1.5 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none"
+            onKeyDown={(e) => e.key === "Enter" && handleAddBlock()}
+          />
+          <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={newBlockApproval}
+              onChange={(e) => setNewBlockApproval(e.target.checked)}
+              className="rounded border-gray-600 bg-gray-800 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0"
+            />
+            Требовать подтверждение
+          </label>
+          <div className="flex gap-2">
+            <button
+              onClick={handleAddBlock}
+              disabled={!newBlockName.trim()}
+              className="flex-1 py-1.5 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500 disabled:opacity-30 transition-colors"
+            >
+              Создать
+            </button>
+            <button
+              onClick={() => { setShowAddForm(false); setNewBlockName(""); setNewBlockDesc(""); }}
+              className="px-3 py-1.5 rounded-md border border-gray-700 text-gray-400 text-sm hover:text-gray-300 transition-colors"
+            >
+              Отмена
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto py-1">
         {blocks.map((block, idx) => {
@@ -219,15 +288,21 @@ export default function BlockSidebar({
         })}
       </div>
 
-      <div className="p-3 border-t border-gray-800">
-        <button
-          onClick={onAddBlock}
-          className="w-full py-2 rounded-lg border-2 border-dashed border-gray-700 text-gray-500
-            hover:border-gray-600 hover:text-gray-400 transition-colors text-sm font-medium"
-        >
-          + Добавить блок
-        </button>
-      </div>
+      {/* Empty state */}
+      {blocks.length === 0 && !showAddForm && (
+        <div className="flex-1 flex items-center justify-center px-4">
+          <div className="text-center space-y-3">
+            <p className="text-gray-500 text-sm">Нет блоков</p>
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500 transition-colors"
+            >
+              + Создать первый блок
+            </button>
+            <p className="text-gray-600 text-xs">или используйте чат-ассистент</p>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

@@ -357,7 +357,7 @@ export default function ProjectPage({
           agents={state.agents}
           selectedBlockId={selectedBlockId}
           onSelectBlock={setSelectedBlockId}
-          onAddBlock={() => sendAction("add_block", { name: "Новый блок" })}
+          onAddBlock={(name, description, requiresApproval) => sendAction("add_block", { name, description, requires_approval: requiresApproval })}
           onReorderBlocks={(ids) => sendAction("reorder_blocks", { block_ids: ids })}
           onDeleteBlock={(blockId) => sendAction("remove_block", { block_id: blockId })}
         />
