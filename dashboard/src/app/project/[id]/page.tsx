@@ -86,35 +86,39 @@ export default function ProjectPage({
 
   // Auto-advance in auto mode
   const autoAdvance = useCallback(async () => {
-    const res = await fetch(`/api/state/${id}`);
-    if (!res.ok) return;
-    const text = await res.text();
-    if (text !== lastJsonRef.current) {
-      lastJsonRef.current = text;
-      setState(JSON.parse(text));
-    }
-    const data = JSON.parse(text) as ProjectState;
+    try {
+      const res = await fetch(`/api/state/${id}`);
+      if (!res.ok) return;
+      const text = await res.text();
+      if (text !== lastJsonRef.current) {
+        lastJsonRef.current = text;
+        setState(JSON.parse(text));
+      }
+      const data = JSON.parse(text) as ProjectState;
 
-    if (data.status !== "running" || data.mode !== "auto") return;
+      if (data.status !== "running" || data.mode !== "auto") return;
 
-    // Check if there are pending agents whose deps are all completed within their block
-    const hasReady = data.blocks?.some((block) => {
-      return block.agents.some((nodeId) => {
-        const agent = data.agents[nodeId];
-        if (!agent || agent.status !== "pending") return false;
-        const deps = block.edges
-          .filter(([, tgt]) => tgt === nodeId)
-          .map(([src]) => src);
-        return deps.every((d) => data.agents[d]?.status === "completed");
+      // Check if there are pending agents whose deps are all completed within their block
+      const hasReady = data.blocks?.some((block) => {
+        return block.agents.some((nodeId) => {
+          const agent = data.agents[nodeId];
+          if (!agent || agent.status !== "pending") return false;
+          const deps = block.edges
+            .filter(([, tgt]) => tgt === nodeId)
+            .map(([src]) => src);
+          return deps.every((d) => data.agents[d]?.status === "completed");
+        });
       });
-    });
 
-    if (hasReady) {
-      await fetch(`/api/state/${id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "run_next" }),
-      });
+      if (hasReady) {
+        await fetch(`/api/state/${id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "run_next" }),
+        });
+      }
+    } catch {
+      // Network error during polling — ignore silently
     }
   }, [id]);
 
