@@ -65,6 +65,23 @@ AGENT_REGISTRY: Dict[str, str] = {
     # Фидбек
     "customer-support":   "agents/feedback/customer-support",
     "data-analyst":       "agents/feedback/data-analyst",
+
+    # Контент-конвейер
+    "trend-researcher":     "agents/content/trend-researcher",
+    "catalog-analyst":      "agents/content/catalog-analyst",
+    "content-strategist":   "agents/content/content-strategist",
+    "post-writer":          "agents/content/post-writer",
+    "script-writer":        "agents/content/script-writer",
+    "story-writer":         "agents/content/story-writer",
+    "image-generator":      "agents/content/image-generator",
+    "video-generator":      "agents/content/video-generator",
+    "music-composer":       "agents/content/music-composer",
+    "content-assembler":    "agents/content/content-assembler",
+    "quality-checker":      "agents/content/quality-checker",
+    "telegram-poster":      "agents/content/telegram-poster",
+    "instagram-poster":     "agents/content/instagram-poster",
+    "youtube-poster":       "agents/content/youtube-poster",
+    "analytics-collector":  "agents/content/analytics-collector",
 }
 
 # =============================================================================
