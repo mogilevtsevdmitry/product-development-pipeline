@@ -1124,11 +1124,42 @@ const AGENT_PHASES: Record<string, string> = {
  * Условия: все зависимости completed + не заблокирован gate-точкой.
  */
 function findReadyAgents(state: ProjectState): string[] {
-  // Find agents blocked by unresolved gates
+  const { computeAllBlockStatuses } = require("./types") as typeof import("./types");
+
+  // If we have blocks, use block-aware logic
+  if (state.blocks?.length) {
+    const blockStatuses = computeAllBlockStatuses(state.blocks, state.agents);
+    const ready: string[] = [];
+
+    for (const block of state.blocks) {
+      const bs = blockStatuses[block.id];
+
+      // Skip blocks that are blocked, awaiting approval, or completed
+      if (bs === "blocked" || bs === "awaiting_approval" || bs === "completed") continue;
+
+      // For pending/running/failed blocks: find ready agents within
+      for (const agentId of block.agents) {
+        const agent = state.agents[agentId];
+        if (!agent || agent.status !== "pending") continue;
+
+        // Check intra-block dependencies (edges within the block)
+        const deps = (block.edges || [])
+          .filter(([, tgt]: [string, string]) => tgt === agentId)
+          .map(([src]: [string, string]) => src);
+
+        const allDone = deps.every(
+          (d: string) => state.agents[d]?.status === "completed"
+        );
+        if (allDone) ready.push(agentId);
+      }
+    }
+    return ready;
+  }
+
+  // Legacy: use pipeline_graph (for v1 projects without blocks)
   const blockedByGate = new Set<string>();
   for (const gate of GATES) {
-    if (state.gate_decisions[gate.name]) continue; // gate resolved
-    // Check if gate should be active (all "after" agents completed)
+    if (state.gate_decisions[gate.name]) continue;
     const afterInGraph = gate.after.filter((a) =>
       state.pipeline_graph.nodes.includes(a)
     );
@@ -1136,7 +1167,6 @@ function findReadyAgents(state: ProjectState): string[] {
       (a) => state.agents[a]?.status === "completed"
     );
     if (allAfterDone) {
-      // Gate is active but not resolved — block "before" agents
       for (const b of gate.before) blockedByGate.add(b);
     }
   }
