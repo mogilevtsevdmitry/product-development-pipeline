@@ -2417,6 +2417,30 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
     }
   }
 
+  // Media agents get access to media-tools MCP (image/video/music generation)
+  const MEDIA_AGENTS = new Set(["image-generator", "video-generator", "music-composer"]);
+  if (MEDIA_AGENTS.has(agentId)) {
+    const mediaServerPath = path.resolve(process.cwd(), "src", "mcp", "media-server.mjs");
+    if (fs.existsSync(mediaServerPath)) {
+      const mcpConfig = JSON.stringify({
+        mcpServers: {
+          "media-tools": {
+            command: "node",
+            args: [mediaServerPath],
+            env: {
+              OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
+              KLING_ACCESS_KEY: process.env.KLING_ACCESS_KEY || "",
+              KLING_SECRET_KEY: process.env.KLING_SECRET_KEY || "",
+              BEATOVEN_API_KEY: process.env.BEATOVEN_API_KEY || "",
+              OUTPUT_DIR: outputDir,
+            },
+          },
+        },
+      });
+      claudeCmd = `cat "${tmpFile}" | claude --print --output-format json --model ${selectedModel} --dangerously-skip-permissions --mcp-config '${mcpConfig}'`;
+    }
+  }
+
   // Code agents use external project_path as working directory (when set)
   let agentCwd = outputDir;
   if (state.project_path && CODE_AGENTS.has(agentId)) {
