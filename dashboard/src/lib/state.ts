@@ -1093,6 +1093,22 @@ const AGENT_DIRS: Record<string, string> = {
   "customer-support": "feedback/customer-support",
   "data-analyst": "feedback/data-analyst",
   orchestrator: "meta/orchestrator",
+  // Контент-конвейер
+  "trend-researcher": "content/trend-researcher",
+  "catalog-analyst": "content/catalog-analyst",
+  "content-strategist": "content/content-strategist",
+  "post-writer": "content/post-writer",
+  "script-writer": "content/script-writer",
+  "story-writer": "content/story-writer",
+  "image-generator": "content/image-generator",
+  "video-generator": "content/video-generator",
+  "music-composer": "content/music-composer",
+  "content-assembler": "content/content-assembler",
+  "quality-checker": "content/quality-checker",
+  "telegram-poster": "content/telegram-poster",
+  "instagram-poster": "content/instagram-poster",
+  "youtube-poster": "content/youtube-poster",
+  "analytics-collector": "content/analytics-collector",
 };
 
 const AGENT_PHASES: Record<string, string> = {
@@ -1117,6 +1133,22 @@ const AGENT_PHASES: Record<string, string> = {
   "customer-support": "feedback",
   "data-analyst": "feedback",
   orchestrator: "meta",
+  // Контент-конвейер
+  "trend-researcher": "content",
+  "catalog-analyst": "content",
+  "content-strategist": "content",
+  "post-writer": "content",
+  "script-writer": "content",
+  "story-writer": "content",
+  "image-generator": "content",
+  "video-generator": "content",
+  "music-composer": "content",
+  "content-assembler": "content",
+  "quality-checker": "content",
+  "telegram-poster": "content",
+  "instagram-poster": "content",
+  "youtube-poster": "content",
+  "analytics-collector": "content",
 };
 
 /**
