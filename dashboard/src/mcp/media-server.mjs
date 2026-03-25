@@ -388,6 +388,92 @@ async function generateMusic(mood, duration, genre = "ambient", bpm) {
 }
 
 // ============================================================================
+// Product Image from ESSENS Catalog
+// ============================================================================
+
+async function getProductImage(productId) {
+  const apiToken = process.env.ESSENS_API_TOKEN;
+  if (!apiToken) return { error: "ESSENS_API_TOKEN not set" };
+
+  try {
+    // Fetch product by ID
+    const res = await httpRequest(
+      `https://bot.beauty-shop-24.ru/api/admin/catalog/products/${productId}`,
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${apiToken}` },
+      }
+    );
+
+    if (res.status !== 200) {
+      // Try search by name/id
+      const searchRes = await httpRequest(
+        `https://bot.beauty-shop-24.ru/api/admin/catalog/products?search=${encodeURIComponent(productId)}&limit=1`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${apiToken}` },
+        }
+      );
+
+      const products = searchRes.data?.products || searchRes.data?.items || (Array.isArray(searchRes.data) ? searchRes.data : []);
+      if (products.length === 0) return { error: `Товар "${productId}" не найден в каталоге` };
+
+      const product = products[0];
+      const imageUrl = product.image_url;
+      if (!imageUrl) return { error: "У товара нет изображения", product_name: product.name };
+
+      const imageId = `catalog-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+      const ext = imageUrl.split(".").pop()?.split("?")[0] || "png";
+      const filename = `${imageId}.${ext}`;
+      const outputPath = path.join(OUTPUT_DIR, filename);
+      fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+
+      await downloadFile(imageUrl, outputPath);
+      const stats = fs.statSync(outputPath);
+
+      return {
+        success: true,
+        image_id: imageId,
+        image_path: outputPath,
+        filename,
+        source: "essens_catalog",
+        product_id: product.id || productId,
+        product_name: product.name,
+        original_url: imageUrl,
+        file_size_kb: Math.round(stats.size / 1024),
+      };
+    }
+
+    const product = res.data;
+    const imageUrl = product.image_url;
+    if (!imageUrl) return { error: "У товара нет изображения", product_name: product.name };
+
+    const imageId = `catalog-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+    const ext = imageUrl.split(".").pop()?.split("?")[0] || "png";
+    const filename = `${imageId}.${ext}`;
+    const outputPath = path.join(OUTPUT_DIR, filename);
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+
+    await downloadFile(imageUrl, outputPath);
+    const stats = fs.statSync(outputPath);
+
+    return {
+      success: true,
+      image_id: imageId,
+      image_path: outputPath,
+      filename,
+      source: "essens_catalog",
+      product_id: product.id || productId,
+      product_name: product.name,
+      original_url: imageUrl,
+      file_size_kb: Math.round(stats.size / 1024),
+    };
+  } catch (err) {
+    return { error: `Failed to fetch product image: ${err.message}` };
+  }
+}
+
+// ============================================================================
 // MCP Protocol
 // ============================================================================
 
@@ -419,6 +505,17 @@ const TOOLS_META = [
     },
   },
   {
+    name: "get_product_image",
+    description: "Скачать реальное фото товара из каталога ESSENS по product_id. Используй ЭТО вместо генерации, когда нужно изображение конкретного продукта.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        product_id: { type: "string", description: "ID товара из каталога или название для поиска" },
+      },
+      required: ["product_id"],
+    },
+  },
+  {
     name: "generate_music",
     description: "Сгенерировать фоновую музыку через Beatoven.ai по настроению и параметрам",
     inputSchema: {
@@ -440,6 +537,8 @@ async function handleToolCall(name, args) {
       return await generateImage(args.prompt, args.size || "1080x1080", args.quality || "medium");
     case "generate_video":
       return await generateVideo(args.prompt, args.duration || 5, args.aspect_ratio || "9:16");
+    case "get_product_image":
+      return await getProductImage(args.product_id);
     case "generate_music":
       return await generateMusic(args.mood, args.duration, args.genre || "ambient", args.bpm);
     default:

@@ -2430,6 +2430,7 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
             env: {
               OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
               BEATOVEN_API_KEY: process.env.BEATOVEN_API_KEY || "",
+              ESSENS_API_TOKEN: process.env.ESSENS_API_TOKEN || "",
               OUTPUT_DIR: outputDir,
             },
           },
