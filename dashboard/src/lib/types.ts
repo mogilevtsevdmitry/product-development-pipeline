@@ -132,35 +132,108 @@ export interface PipelineBlock {
   description?: string;
   agents: string[];
   edges: [string, string][];
+  depends_on: string[];           // IDs of blocks this block depends on (DAG)
   requires_approval: boolean;
   approval?: BlockApproval;
 }
 
+// --- Schedule & Cycles ---
+
+export type SchedulePreset = "hourly" | "daily" | "weekly" | "custom";
+
+export interface ProjectSchedule {
+  preset: SchedulePreset;
+  cron?: string;                  // for "custom" preset
+  enabled: boolean;
+}
+
+export interface CycleRecord {
+  cycle: number;
+  started_at: string;
+  completed_at?: string;
+  status: "completed" | "failed" | "running";
+}
+
 // --- Block status computation ---
 
+/**
+ * Compute all block statuses at once (needed for DAG deps).
+ * Returns a map of blockId → BlockStatus.
+ */
+export function computeAllBlockStatuses(
+  blocks: PipelineBlock[],
+  agents: Record<string, AgentState>
+): Record<string, BlockStatus> {
+  const result: Record<string, BlockStatus> = {};
+
+  // Topological iteration: compute blocks with no unresolved deps first
+  const remaining = new Set(blocks.map((b) => b.id));
+  const blockMap = new Map(blocks.map((b) => [b.id, b]));
+
+  // Multiple passes until all resolved (safe for DAGs)
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const blockId of remaining) {
+      const block = blockMap.get(blockId)!;
+      const deps = block.depends_on || [];
+      const depsResolved = deps.every((depId) => depId in result);
+      if (!depsResolved) continue;
+
+      const blockAgents = block.agents.map((id) => agents[id]).filter(Boolean);
+
+      if (blockAgents.length === 0) {
+        result[blockId] = "pending";
+        remaining.delete(blockId);
+        changed = true;
+        continue;
+      }
+
+      const hasRunning = blockAgents.some((a) => a.status === "running");
+      const hasFailed = blockAgents.some((a) => a.status === "failed");
+      const allDone = blockAgents.every(
+        (a) => a.status === "completed" || a.status === "skipped"
+      );
+
+      if (hasFailed) {
+        result[blockId] = "failed";
+      } else if (allDone && block.requires_approval && !block.approval) {
+        result[blockId] = "awaiting_approval";
+      } else if (allDone) {
+        result[blockId] = "completed";
+      } else if (hasRunning) {
+        result[blockId] = "running";
+      } else {
+        // Check if all dependency blocks are completed
+        const allDepsCompleted = deps.every(
+          (depId) => result[depId] === "completed"
+        );
+        result[blockId] = allDepsCompleted ? "pending" : "blocked";
+      }
+
+      remaining.delete(blockId);
+      changed = true;
+    }
+  }
+
+  // Any remaining blocks (circular deps or broken refs) → blocked
+  for (const blockId of remaining) {
+    result[blockId] = "blocked";
+  }
+
+  return result;
+}
+
+// Legacy single-block computation (kept for backward compat)
 export function computeBlockStatus(
   block: PipelineBlock,
   agents: Record<string, AgentState>,
   prevBlockStatus?: BlockStatus
 ): BlockStatus {
-  const blockAgents = block.agents.map((id) => agents[id]).filter(Boolean);
-  if (blockAgents.length === 0) return "pending";
-
-  const hasRunning = blockAgents.some((a) => a.status === "running");
-  const hasFailed = blockAgents.some((a) => a.status === "failed");
-  const allDone = blockAgents.every(
-    (a) => a.status === "completed" || a.status === "skipped"
-  );
-
-  if (hasFailed) return "failed";
-  if (allDone && block.requires_approval && !block.approval) return "awaiting_approval";
-  if (allDone) return "completed";
-  if (hasRunning) return "running";
-
-  // Check if blocked by previous block
-  if (prevBlockStatus && prevBlockStatus !== "completed") return "blocked";
-
-  return "pending";
+  return computeAllBlockStatuses(
+    [block],
+    agents
+  )[block.id] || "pending";
 }
 
 // --- Project State ---
@@ -177,6 +250,10 @@ export interface ProjectState {
   current_gate: GateType | string | null;
   // Schema v2: blocks-based pipeline
   blocks: PipelineBlock[];
+  // Schedule & cycles
+  schedule?: ProjectSchedule;
+  current_cycle: number;
+  cycle_history: CycleRecord[];
   // Legacy (schema v1, kept for migration)
   pipeline_graph: PipelineGraph;
   agents: Record<string, AgentState>;

@@ -127,6 +127,7 @@ DEFAULT_BLOCKS: List[Dict[str, Any]] = [
             ["market-researcher", "product-owner"],
             ["product-owner", "business-analyst"],
         ],
+        "depends_on": [],
         "requires_approval": True,
     },
     {
@@ -135,6 +136,7 @@ DEFAULT_BLOCKS: List[Dict[str, Any]] = [
         "description": "Проверка юридических и compliance требований",
         "agents": ["legal-compliance"],
         "edges": [],
+        "depends_on": ["research"],
         "requires_approval": False,
     },
     {
@@ -143,6 +145,7 @@ DEFAULT_BLOCKS: List[Dict[str, Any]] = [
         "description": "Проектирование пользовательского интерфейса и опыта",
         "agents": ["ux-ui-designer"],
         "edges": [],
+        "depends_on": ["research"],
         "requires_approval": False,
     },
     {
@@ -157,6 +160,7 @@ DEFAULT_BLOCKS: List[Dict[str, Any]] = [
             ["tech-lead", "frontend-developer"],
             ["tech-lead", "devops-engineer"],
         ],
+        "depends_on": ["design", "legal"],
         "requires_approval": True,
     },
     {
@@ -165,6 +169,7 @@ DEFAULT_BLOCKS: List[Dict[str, Any]] = [
         "description": "Проверка качества и безопасности",
         "agents": ["qa-engineer", "security-engineer"],
         "edges": [],
+        "depends_on": ["development"],
         "requires_approval": True,
     },
     {
@@ -173,6 +178,7 @@ DEFAULT_BLOCKS: List[Dict[str, Any]] = [
         "description": "Подготовка и выпуск релиза",
         "agents": ["release-manager"],
         "edges": [],
+        "depends_on": ["testing"],
         "requires_approval": False,
     },
     {
@@ -184,6 +190,7 @@ DEFAULT_BLOCKS: List[Dict[str, Any]] = [
             ["product-marketer", "smm-manager"],
             ["product-marketer", "content-creator"],
         ],
+        "depends_on": ["release"],
         "requires_approval": False,
     },
     {
@@ -192,6 +199,7 @@ DEFAULT_BLOCKS: List[Dict[str, Any]] = [
         "description": "Поддержка пользователей и аналитика",
         "agents": ["customer-support", "data-analyst"],
         "edges": [],
+        "depends_on": ["release"],
         "requires_approval": False,
     },
 ]

@@ -32,6 +32,7 @@ const DEFAULT_BLOCKS: import("./types").PipelineBlock[] = [
     agents: ["problem-researcher", "market-researcher", "product-owner", "business-analyst"],
     edges: [["problem-researcher", "market-researcher"], ["market-researcher", "product-owner"], ["product-owner", "business-analyst"]],
     requires_approval: true,
+    depends_on: [],
   },
   {
     id: "legal",
@@ -40,6 +41,7 @@ const DEFAULT_BLOCKS: import("./types").PipelineBlock[] = [
     agents: ["legal-compliance"],
     edges: [],
     requires_approval: false,
+    depends_on: ["research"],
   },
   {
     id: "design",
@@ -48,6 +50,7 @@ const DEFAULT_BLOCKS: import("./types").PipelineBlock[] = [
     agents: ["ux-ui-designer"],
     edges: [],
     requires_approval: false,
+    depends_on: ["research"],
   },
   {
     id: "development",
@@ -56,6 +59,7 @@ const DEFAULT_BLOCKS: import("./types").PipelineBlock[] = [
     agents: ["pipeline-architect", "system-architect", "tech-lead", "backend-developer", "frontend-developer", "devops-engineer"],
     edges: [["pipeline-architect", "system-architect"], ["system-architect", "tech-lead"], ["tech-lead", "backend-developer"], ["tech-lead", "frontend-developer"], ["tech-lead", "devops-engineer"]],
     requires_approval: true,
+    depends_on: ["design", "legal"],
   },
   {
     id: "testing",
@@ -64,6 +68,7 @@ const DEFAULT_BLOCKS: import("./types").PipelineBlock[] = [
     agents: ["qa-engineer", "security-engineer"],
     edges: [],
     requires_approval: true,
+    depends_on: ["development"],
   },
   {
     id: "release",
@@ -72,6 +77,7 @@ const DEFAULT_BLOCKS: import("./types").PipelineBlock[] = [
     agents: ["release-manager"],
     edges: [],
     requires_approval: false,
+    depends_on: ["testing"],
   },
   {
     id: "marketing",
@@ -80,6 +86,7 @@ const DEFAULT_BLOCKS: import("./types").PipelineBlock[] = [
     agents: ["product-marketer", "smm-manager", "content-creator"],
     edges: [["product-marketer", "smm-manager"], ["product-marketer", "content-creator"]],
     requires_approval: false,
+    depends_on: ["release"],
   },
   {
     id: "feedback",
@@ -88,11 +95,26 @@ const DEFAULT_BLOCKS: import("./types").PipelineBlock[] = [
     agents: ["customer-support", "data-analyst"],
     edges: [],
     requires_approval: false,
+    depends_on: ["release"],
   },
 ];
 
 function migrateToV2(state: ProjectState): ProjectState {
-  if (state.schema_version >= 2 && state.blocks?.length) return state;
+  // Patch existing v2 blocks that are missing depends_on or cycle fields
+  if (state.schema_version >= 2 && state.blocks?.length) {
+    let patched = false;
+    for (const block of state.blocks) {
+      if (!block.depends_on) {
+        const defaultMatch = DEFAULT_BLOCKS.find((db) => db.id === block.id);
+        block.depends_on = defaultMatch?.depends_on || [];
+        patched = true;
+      }
+    }
+    if (!state.current_cycle) { state.current_cycle = 1; patched = true; }
+    if (!state.cycle_history) { state.cycle_history = []; patched = true; }
+    if (patched) state.schema_version = 2; // ensure
+    return state;
+  }
 
   // Build blocks from existing pipeline_graph by matching agents to default blocks
   const graphNodes = new Set(state.pipeline_graph?.nodes || []);
@@ -136,6 +158,17 @@ function migrateToV2(state: ProjectState): ProjectState {
 
   state.blocks = blocks;
   state.schema_version = 2;
+  if (!state.current_cycle) state.current_cycle = 1;
+  if (!state.cycle_history) state.cycle_history = [];
+
+  // Ensure all blocks have depends_on (upgrade from early v2 without it)
+  for (const block of state.blocks) {
+    if (!block.depends_on) {
+      const defaultMatch = DEFAULT_BLOCKS.find((db) => db.id === block.id);
+      block.depends_on = defaultMatch?.depends_on || [];
+    }
+  }
+
   return state;
 }
 
@@ -509,9 +542,12 @@ export function createProject(
           ["market-researcher", "product-owner"] as [string, string],
         ],
         requires_approval: true,
+        depends_on: [] as string[],
       },
     ],
     schema_version: 2,
+    current_cycle: 1,
+    cycle_history: [],
   };
 
   // Сохраняем state JSON
@@ -2921,6 +2957,7 @@ export function addBlock(
     agents: [],
     edges: [],
     requires_approval: requiresApproval,
+    depends_on: [],
   };
 
   if (afterBlockId) {
@@ -3040,6 +3077,91 @@ export function removeAgentFromBlock(id: string, blockId: string, agentId: strin
   block.edges = block.edges.filter(([s, t]) => s !== agentId && t !== agentId);
 
   state.updated_at = new Date().toISOString();
+  const filePath = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  return true;
+}
+
+// ============================================================================
+// Cycle management & scheduling
+// ============================================================================
+
+export function restartCycle(id: string): boolean {
+  const state = getProjectState(id);
+  if (!state) return false;
+
+  // Record current cycle in history if there are any completed/running agents
+  const hasActivity = Object.values(state.agents).some(
+    (a) => a.status !== "pending"
+  );
+  if (hasActivity) {
+    const cycleRecord = {
+      cycle: state.current_cycle || 1,
+      started_at: state.created_at,
+      completed_at: new Date().toISOString(),
+      status: (state.status === "completed" ? "completed" : state.status === "failed" ? "failed" : "running") as "completed" | "failed" | "running",
+    };
+    if (!state.cycle_history) state.cycle_history = [];
+    state.cycle_history.push(cycleRecord);
+  }
+
+  // Increment cycle
+  state.current_cycle = (state.current_cycle || 1) + 1;
+
+  // Reset all agents to pending
+  for (const agent of Object.values(state.agents)) {
+    agent.status = "pending";
+    agent.started_at = null;
+    agent.completed_at = null;
+    agent.error = null;
+    // Keep usage_history and artifacts for history
+  }
+
+  // Reset all block approvals
+  if (state.blocks) {
+    for (const block of state.blocks) {
+      delete block.approval;
+    }
+  }
+
+  state.status = "running";
+  state.current_gate = null;
+  state.updated_at = new Date().toISOString();
+
+  const filePath = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  return true;
+}
+
+export function updateSchedule(
+  id: string,
+  schedule: { preset: string; cron?: string; enabled: boolean }
+): boolean {
+  const state = getProjectState(id);
+  if (!state) return false;
+
+  state.schedule = schedule as any;
+  state.updated_at = new Date().toISOString();
+
+  const filePath = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  return true;
+}
+
+export function updateBlockDeps(
+  id: string,
+  blockId: string,
+  dependsOn: string[]
+): boolean {
+  const state = getProjectState(id);
+  if (!state || !state.blocks) return false;
+
+  const block = state.blocks.find((b) => b.id === blockId);
+  if (!block) return false;
+
+  block.depends_on = dependsOn;
+  state.updated_at = new Date().toISOString();
+
   const filePath = path.join(STATE_DIR, `${id}.json`);
   fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
   return true;

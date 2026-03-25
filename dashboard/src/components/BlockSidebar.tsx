@@ -5,7 +5,7 @@ import {
   PipelineBlock,
   AgentState,
   BlockStatus,
-  computeBlockStatus,
+  computeAllBlockStatuses,
 } from "@/lib/types";
 
 interface BlockSidebarProps {
@@ -96,11 +96,7 @@ export default function BlockSidebar({
 }: BlockSidebarProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
-  const blockStatuses: Record<string, BlockStatus> = {};
-  blocks.forEach((block, idx) => {
-    const prevStatus = idx > 0 ? blockStatuses[blocks[idx - 1].id] : undefined;
-    blockStatuses[block.id] = computeBlockStatus(block, agents, prevStatus);
-  });
+  const blockStatuses = computeAllBlockStatuses(blocks, agents);
 
   return (
     <aside className="w-72 bg-gray-950 border-r border-gray-800 flex flex-col h-full">
@@ -119,8 +115,13 @@ export default function BlockSidebar({
           const completed = getCompletedCount(block, agents);
           const total = block.agents.length;
 
-          const prevBlockName =
-            isBlocked && idx > 0 ? blocks[idx - 1].name : null;
+          const depBlockNames =
+            isBlocked && block.depends_on?.length
+              ? block.depends_on
+                  .map((depId) => blocks.find((b) => b.id === depId)?.name)
+                  .filter(Boolean)
+                  .join(", ")
+              : null;
 
           return (
             <div
@@ -135,8 +136,8 @@ export default function BlockSidebar({
               onMouseEnter={() => setHoveredId(block.id)}
               onMouseLeave={() => setHoveredId(null)}
               title={
-                isBlocked && prevBlockName
-                  ? `Ожидает завершения блока «${prevBlockName}»`
+                isBlocked && depBlockNames
+                  ? `Ожидает завершения: ${depBlockNames}`
                   : undefined
               }
             >
@@ -203,6 +204,14 @@ export default function BlockSidebar({
                   <span className="text-xs text-gray-500 tabular-nums shrink-0">
                     {completed}/{total}
                   </span>
+                </div>
+              )}
+              {block.depends_on?.length > 0 && (
+                <div className="text-[10px] text-gray-600 mt-0.5 ml-6 truncate">
+                  после: {block.depends_on.map((depId) => {
+                    const dep = blocks.find((b) => b.id === depId);
+                    return dep?.name || depId;
+                  }).join(", ")}
                 </div>
               )}
             </div>

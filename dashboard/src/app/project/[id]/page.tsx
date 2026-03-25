@@ -6,7 +6,7 @@ import StatusBadge from "@/components/StatusBadge";
 import BlockSidebar from "@/components/BlockSidebar";
 import BlockView from "@/components/BlockView";
 import type { ProjectState, ProjectStatus, BlockStatus, PipelineBlock } from "@/lib/types";
-import { computeBlockStatus } from "@/lib/types";
+import { computeAllBlockStatuses } from "@/lib/types";
 
 function formatDate(iso?: string): string {
   if (!iso) return "—";
@@ -156,15 +156,15 @@ export default function ProjectPage({
   const selectedBlock = blocks.find((b) => b.id === selectedBlockId) || null;
 
   // Compute block statuses
-  const blockStatuses: Record<string, BlockStatus> = {};
-  blocks.forEach((block, idx) => {
-    const prevStatus = idx > 0 ? blockStatuses[blocks[idx - 1].id] : undefined;
-    blockStatuses[block.id] = computeBlockStatus(block, state.agents, prevStatus);
-  });
+  const blockStatuses = computeAllBlockStatuses(blocks, state.agents);
 
   const selectedBlockStatus = selectedBlock ? blockStatuses[selectedBlock.id] : undefined;
-  const selectedBlockIdx = selectedBlock ? blocks.findIndex((b) => b.id === selectedBlock.id) : -1;
-  const prevBlockName = selectedBlockIdx > 0 ? blocks[selectedBlockIdx - 1].name : undefined;
+  const depBlockNames = selectedBlock?.depends_on?.length
+    ? selectedBlock.depends_on
+        .map((depId) => blocks.find((b) => b.id === depId)?.name)
+        .filter(Boolean)
+        .join(", ")
+    : undefined;
 
   // Running agents across all blocks
   const runningAgents = Object.entries(state.agents).filter(([, a]) => a.status === "running");
@@ -209,6 +209,9 @@ export default function ProjectPage({
           {/* Overall progress */}
           <span className="text-xs text-gray-500 mr-2">
             {completedAgents}/{totalAgents} агентов
+            {state.current_cycle > 1 && (
+              <span className="ml-1 text-indigo-400">· Цикл #{state.current_cycle}</span>
+            )}
           </span>
 
           {/* Start pipeline */}
@@ -230,6 +233,17 @@ export default function ProjectPage({
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors disabled:opacity-50"
             >
               {actionLoading === "run_next" ? "⏳..." : "▶ Следующий"}
+            </button>
+          )}
+
+          {/* Restart cycle */}
+          {(state.status === "completed" || state.status === "failed" || state.status === "running" || state.status === "paused") && (
+            <button
+              onClick={() => sendAction("restart_cycle")}
+              disabled={actionLoading !== null}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-indigo-600/40 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition-colors disabled:opacity-50"
+            >
+              {actionLoading === "restart_cycle" ? "⏳..." : "🔄 Новый цикл"}
             </button>
           )}
 
@@ -265,6 +279,26 @@ export default function ProjectPage({
             }}
           >
             {state.mode === "auto" ? "👤 Ручной" : "🤖 Авто"}
+          </button>
+
+          {/* Schedule toggle */}
+          <button
+            disabled={actionLoading !== null}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors disabled:opacity-50 ${
+              state.schedule?.enabled
+                ? "border-indigo-600/40 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20"
+                : "border-gray-700 bg-gray-800 text-gray-500 hover:bg-gray-700"
+            }`}
+            onClick={() => {
+              const current = state.schedule || { preset: "daily", enabled: false };
+              sendAction("update_schedule", {
+                schedule: { ...current, enabled: !current.enabled },
+              });
+            }}
+          >
+            {state.schedule?.enabled
+              ? `⏰ ${state.schedule.preset === "daily" ? "Ежедневно" : state.schedule.preset === "weekly" ? "Еженедельно" : state.schedule.preset === "hourly" ? "Ежечасно" : state.schedule.cron || "По расписанию"}`
+              : "📅 Расписание"}
           </button>
 
           {/* Delete */}
@@ -334,7 +368,7 @@ export default function ProjectPage({
               agents={state.agents}
               projectId={state.project_id}
               blockStatus={selectedBlockStatus}
-              prevBlockName={prevBlockName}
+              prevBlockName={depBlockNames}
               onApproval={handleBlockApproval}
             />
           ) : (

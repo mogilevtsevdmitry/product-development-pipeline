@@ -22,6 +22,9 @@ import {
   reorderBlocks,
   addAgentToBlock,
   removeAgentFromBlock,
+  restartCycle,
+  updateSchedule,
+  updateBlockDeps,
 } from "@/lib/state";
 import type { GateType, GateDecisionValue, PipelineMode } from "@/lib/types";
 
@@ -164,6 +167,24 @@ export async function POST(
   if (body.action === "remove_agent_from_block" && body.block_id && body.agent_id) {
     const ok = removeAgentFromBlock(id, body.block_id, body.agent_id);
     if (!ok) return NextResponse.json({ error: "Не удалось удалить агента из блока" }, { status: 400 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "restart_cycle") {
+    const ok = restartCycle(id);
+    if (!ok) return NextResponse.json({ error: "Не удалось перезапустить цикл" }, { status: 400 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "update_schedule" && body.schedule) {
+    const ok = updateSchedule(id, body.schedule);
+    if (!ok) return NextResponse.json({ error: "Не удалось обновить расписание" }, { status: 400 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "update_block_deps" && body.block_id && body.depends_on) {
+    const ok = updateBlockDeps(id, body.block_id, body.depends_on);
+    if (!ok) return NextResponse.json({ error: "Не удалось обновить зависимости" }, { status: 400 });
     return NextResponse.json({ ok: true });
   }
 
