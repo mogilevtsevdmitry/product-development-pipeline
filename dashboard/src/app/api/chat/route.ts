@@ -295,26 +295,37 @@ export async function POST(request: NextRequest) {
   const MAX_TOOL_ROUNDS = 10;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const response = await fetch(ANTHROPIC_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 4096,
-        system: systemPrompt,
-        tools: TOOLS,
-        messages: currentMessages,
-      }),
-    });
+    // Fetch with retry on 429/529 (rate limit / overloaded)
+    let response: Response | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      response = await fetch(ANTHROPIC_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          max_tokens: 4096,
+          system: systemPrompt,
+          tools: TOOLS,
+          messages: currentMessages,
+        }),
+      });
 
-    if (!response.ok) {
-      const errText = await response.text();
+      if (response.status === 429 || response.status === 529) {
+        const delay = (attempt + 1) * 2000; // 2s, 4s, 6s
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      break;
+    }
+
+    if (!response || !response.ok) {
+      const errText = response ? await response.text() : "No response";
       return NextResponse.json(
-        { error: `Claude API error: ${response.status} ${errText}` },
+        { error: `Claude API error: ${response?.status || 0} — попробуйте через минуту` },
         { status: 502 }
       );
     }
