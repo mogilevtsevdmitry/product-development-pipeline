@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import StatusBadge from "@/components/StatusBadge";
 import BlockSidebar from "@/components/BlockSidebar";
 import BlockView from "@/components/BlockView";
+import ProjectChat from "@/components/ProjectChat";
 import type { ProjectState, ProjectStatus, BlockStatus, PipelineBlock } from "@/lib/types";
 import { computeAllBlockStatuses } from "@/lib/types";
 
@@ -378,6 +379,9 @@ export default function ProjectPage({
           )}
         </main>
       </div>
+
+      {/* Project Chat */}
+      <ProjectChat projectId={state.project_id} onAction={fetchState} />
     </div>
   );
 }

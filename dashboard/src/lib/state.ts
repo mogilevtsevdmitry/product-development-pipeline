@@ -499,29 +499,7 @@ export function createProject(
     }
   }
 
-  // Initialize all agents from all default blocks
-  const agentsState: Record<string, import("./types").AgentState> = {};
-  const allAgentIds: string[] = [];
-  const allEdges: [string, string][] = [];
-
-  for (const block of DEFAULT_BLOCKS) {
-    for (const agentId of block.agents) {
-      if (!agentsState[agentId]) {
-        agentsState[agentId] = {
-          status: "pending" as const,
-          started_at: null,
-          completed_at: null,
-          artifacts: [],
-          error: null,
-        };
-        allAgentIds.push(agentId);
-      }
-    }
-    for (const edge of block.edges) {
-      allEdges.push(edge as [string, string]);
-    }
-  }
-
+  // Empty project — user builds pipeline from scratch
   const state: ProjectState = {
     project_id: projectId,
     name,
@@ -532,14 +510,10 @@ export function createProject(
     mode,
     status: "created",
     current_gate: null,
-    pipeline_graph: {
-      nodes: allAgentIds,
-      edges: allEdges,
-      parallel_groups: [],
-    },
-    agents: agentsState,
+    pipeline_graph: { nodes: [], edges: [], parallel_groups: [] },
+    agents: {},
     gate_decisions: {},
-    blocks: DEFAULT_BLOCKS.map((b) => ({ ...b })),
+    blocks: [],
     schema_version: 2,
     current_cycle: 1,
     cycle_history: [],
