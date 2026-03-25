@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
  * MCP Server for Media Generation tools.
- * All media generation through OpenAI API:
- * - Images: GPT-Image-1 (gpt-image-1)
- * - Video: Sora (via responses API)
- * - Music: Beatoven.ai (separate API)
+ * - Images: OpenAI GPT-Image-1
+ * - Video: Kling AI
+ * - Music: Beatoven.ai
+ * - Product photos: ESSENS Catalog API
  *
- * Required env vars: OPENAI_API_KEY, BEATOVEN_API_KEY
+ * Required env vars: OPENAI_API_KEY, KLING_ACCESS_KEY, KLING_SECRET_KEY, FAL_KEY, ESSENS_API_TOKEN
  * Optional: OUTPUT_DIR (defaults to cwd)
  */
 
@@ -157,14 +157,35 @@ async function generateImage(prompt, size = "1024x1024", quality = "medium") {
 }
 
 // ============================================================================
-// OpenAI Sora (Video Generation)
+// Kling AI (Video Generation)
 // ============================================================================
 
-async function generateVideo(prompt, duration = 5, aspectRatio = "9:16") {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return { error: "OPENAI_API_KEY not set" };
+function generateKlingJWT() {
+  const accessKey = process.env.KLING_ACCESS_KEY;
+  const secretKey = process.env.KLING_SECRET_KEY;
+  if (!accessKey || !secretKey) return null;
 
-  // Map aspect ratio to resolution
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const now = Math.floor(Date.now() / 1000);
+  const payload = Buffer.from(JSON.stringify({
+    iss: accessKey,
+    exp: now + 1800,
+    nbf: now - 5,
+    iat: now,
+  })).toString("base64url");
+
+  const signature = crypto
+    .createHmac("sha256", secretKey)
+    .update(`${header}.${payload}`)
+    .digest("base64url");
+
+  return `${header}.${payload}.${signature}`;
+}
+
+async function generateVideo(prompt, duration = 5, aspectRatio = "9:16") {
+  const token = generateKlingJWT();
+  if (!token) return { error: "KLING_ACCESS_KEY or KLING_SECRET_KEY not set" };
+
   const resMap = {
     "9:16": "1080x1920",
     "16:9": "1920x1080",
@@ -172,113 +193,79 @@ async function generateVideo(prompt, duration = 5, aspectRatio = "9:16") {
   };
 
   try {
-    // Create video generation via responses API
-    const res = await httpRequest(
-      "https://api.openai.com/v1/responses",
+    const createRes = await httpRequest(
+      "https://api.klingai.com/v1/videos/text2video",
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${token}`,
         },
       },
       {
-        model: "sora",
-        input: prompt,
-        tools: [{
-          type: "video_generation",
-          duration,
-          aspect_ratio: aspectRatio,
-          resolution: aspectRatio === "9:16" ? "480p" : "480p", // start with 480p for cost
-        }],
+        prompt,
+        duration: String(duration),
+        aspect_ratio: aspectRatio,
+        model_name: "kling-v1",
       }
     );
 
-    if (res.status !== 200) {
-      return { error: `Sora API error: ${res.status}`, details: res.data };
+    if (createRes.status !== 200 || createRes.data?.code !== 0) {
+      return { error: `Kling API error: ${createRes.status}`, details: createRes.data };
     }
 
-    // Check for pending status — poll if needed
-    let responseData = res.data;
-    const responseId = responseData.id;
+    const taskId = createRes.data?.data?.task_id;
+    if (!taskId) return { error: "No task_id in response" };
 
-    if (responseData.status === "queued" || responseData.status === "in_progress") {
-      // Poll for completion (max 5 minutes)
-      for (let i = 0; i < 60; i++) {
-        await new Promise((r) => setTimeout(r, 5000));
+    // Poll for completion (max 5 minutes)
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
 
-        const pollRes = await httpRequest(
-          `https://api.openai.com/v1/responses/${responseId}`,
-          {
-            method: "GET",
-            headers: { Authorization: `Bearer ${apiKey}` },
-          }
-        );
-
-        if (pollRes.status !== 200) continue;
-        responseData = pollRes.data;
-
-        if (responseData.status === "completed") break;
-        if (responseData.status === "failed") {
-          return { error: `Video generation failed: ${responseData.error || "unknown"}` };
+      const freshToken = generateKlingJWT();
+      const statusRes = await httpRequest(
+        `https://api.klingai.com/v1/videos/text2video/${taskId}`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${freshToken}` },
         }
+      );
+
+      const task = statusRes.data?.data;
+      if (!task) continue;
+
+      if (task.task_status === "succeed") {
+        const videoUrl = task.task_result?.videos?.[0]?.url;
+        if (!videoUrl) return { error: "No video URL in result" };
+
+        const videoId = `vid-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+        const filename = `${videoId}.mp4`;
+        const outputPath = path.join(OUTPUT_DIR, filename);
+        fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+
+        await downloadFile(videoUrl, outputPath);
+        const stats = fs.statSync(outputPath);
+
+        return {
+          success: true,
+          video_id: videoId,
+          video_path: outputPath,
+          filename,
+          duration_sec: duration,
+          resolution: resMap[aspectRatio] || "1080x1920",
+          aspect_ratio: aspectRatio,
+          format: "mp4",
+          file_size_mb: Math.round(stats.size / 1024 / 1024 * 10) / 10,
+          prompt_used: prompt,
+          model: "kling-v1",
+        };
+      }
+
+      if (task.task_status === "failed") {
+        return { error: `Video generation failed: ${task.task_status_msg || "unknown"}` };
       }
     }
 
-    // Extract video URL from output
-    let videoUrl = null;
-    const output = responseData.output || [];
-    for (const item of output) {
-      if (item.type === "video_generation_call" && item.video_url) {
-        videoUrl = item.video_url;
-        break;
-      }
-      // Also check nested results
-      if (item.generation_id) {
-        // Fetch the generation result
-        const genRes = await httpRequest(
-          `https://api.openai.com/v1/videos/generations/${item.generation_id}`,
-          {
-            method: "GET",
-            headers: { Authorization: `Bearer ${apiKey}` },
-          }
-        );
-        if (genRes.data?.url) {
-          videoUrl = genRes.data.url;
-          break;
-        }
-      }
-    }
-
-    if (!videoUrl) {
-      return {
-        error: "No video URL in response",
-        details: { status: responseData.status, output_types: output.map(o => o.type) },
-      };
-    }
-
-    // Download video
-    const videoId = `vid-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
-    const filename = `${videoId}.mp4`;
-    const outputPath = path.join(OUTPUT_DIR, filename);
-    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-
-    await downloadFile(videoUrl, outputPath);
-    const stats = fs.statSync(outputPath);
-
-    return {
-      success: true,
-      video_id: videoId,
-      video_path: outputPath,
-      filename,
-      duration_sec: duration,
-      resolution: resMap[aspectRatio] || "1080x1920",
-      aspect_ratio: aspectRatio,
-      format: "mp4",
-      file_size_mb: Math.round(stats.size / 1024 / 1024 * 10) / 10,
-      prompt_used: prompt,
-      model: "sora",
-    };
+    return { error: "Video generation timed out (5 min)" };
   } catch (err) {
     return { error: `Video generation failed: ${err.message}` };
   }
@@ -289,68 +276,63 @@ async function generateVideo(prompt, duration = 5, aspectRatio = "9:16") {
 // ============================================================================
 
 async function generateMusic(mood, duration, genre = "ambient", bpm) {
-  const apiKey = process.env.BEATOVEN_API_KEY;
-  if (!apiKey) return { error: "BEATOVEN_API_KEY not set" };
+  const falKey = process.env.FAL_KEY;
+  if (!falKey) return { error: "FAL_KEY not set" };
+
+  // Build descriptive prompt from parameters
+  const bpmStr = bpm ? `, ${bpm} BPM` : "";
+  const textPrompt = `${mood} ${genre} instrumental background music, ${duration} seconds long${bpmStr}, no vocals, suitable for beauty brand social media content`;
 
   try {
-    const createRes = await httpRequest(
-      "https://api.beatoven.ai/api/v2/tracks",
+    // Submit to fal.ai queue
+    const submitRes = await httpRequest(
+      "https://queue.fal.run/beatoven/music-generation",
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Key ${falKey}`,
         },
       },
       {
-        title: `${mood}-${genre}-${Date.now()}`,
-        duration_ms: duration * 1000,
-        tempo: bpm ? { value: bpm } : undefined,
-        genre,
-        mood,
+        prompt: textPrompt,
+        duration,
       }
     );
 
-    if (createRes.status !== 200 && createRes.status !== 201) {
-      return { error: `Beatoven API error: ${createRes.status}`, details: createRes.data };
+    if (submitRes.status !== 200) {
+      return { error: `fal.ai API error: ${submitRes.status}`, details: submitRes.data };
     }
 
-    const trackId = createRes.data?.id || createRes.data?.track_id;
-    if (!trackId) return { error: "No track_id in response", details: createRes.data };
+    const requestId = submitRes.data?.request_id;
+    if (!requestId) return { error: "No request_id in response", details: submitRes.data };
 
-    // Compose
-    const composeRes = await httpRequest(
-      `https://api.beatoven.ai/api/v2/tracks/${trackId}/compose`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-      },
-      {}
-    );
-
-    if (composeRes.status !== 200 && composeRes.status !== 202) {
-      return { error: `Beatoven compose error: ${composeRes.status}`, details: composeRes.data };
-    }
-
-    // Poll for completion (max 3 min)
-    for (let i = 0; i < 36; i++) {
+    // Poll for completion (max 5 min)
+    for (let i = 0; i < 60; i++) {
       await new Promise((r) => setTimeout(r, 5000));
 
       const statusRes = await httpRequest(
-        `https://api.beatoven.ai/api/v2/tracks/${trackId}`,
+        `https://queue.fal.run/beatoven/music-generation/requests/${requestId}/status`,
         {
           method: "GET",
-          headers: { Authorization: `Bearer ${apiKey}` },
+          headers: { Authorization: `Key ${falKey}` },
         }
       );
 
-      const track = statusRes.data;
-      if (track?.status === "composed" || track?.status === "ready" || track?.download_url || track?.url) {
-        const audioUrl = track.download_url || track.url || track.audio_url;
-        if (!audioUrl) return { error: "Track composed but no download URL", details: track };
+      const status = statusRes.data?.status;
+
+      if (status === "COMPLETED") {
+        // Get result
+        const resultRes = await httpRequest(
+          `https://queue.fal.run/beatoven/music-generation/requests/${requestId}`,
+          {
+            method: "GET",
+            headers: { Authorization: `Key ${falKey}` },
+          }
+        );
+
+        const audioUrl = resultRes.data?.audio?.url || resultRes.data?.output?.url || resultRes.data?.url;
+        if (!audioUrl) return { error: "Completed but no audio URL", details: resultRes.data };
 
         const musicId = `music-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
         const filename = `${musicId}.mp3`;
@@ -372,16 +354,18 @@ async function generateMusic(mood, duration, genre = "ambient", bpm) {
           format: "mp3",
           file_size_kb: Math.round(stats.size / 1024),
           license: "royalty-free",
-          source: "beatoven",
+          source: "beatoven-via-fal",
+          prompt_used: textPrompt,
         };
       }
 
-      if (track?.status === "failed" || track?.status === "error") {
-        return { error: `Music generation failed: ${track.error || "unknown"}` };
+      if (status === "FAILED") {
+        return { error: `Music generation failed`, details: statusRes.data };
       }
+      // IN_QUEUE, IN_PROGRESS — keep polling
     }
 
-    return { error: "Music generation timed out (3 min)" };
+    return { error: "Music generation timed out (5 min)" };
   } catch (err) {
     return { error: `Music generation failed: ${err.message}` };
   }
@@ -493,7 +477,7 @@ const TOOLS_META = [
   },
   {
     name: "generate_video",
-    description: "Сгенерировать короткое видео через OpenAI Sora по текстовому промпту",
+    description: "Сгенерировать короткое видео через Kling AI по текстовому промпту",
     inputSchema: {
       type: "object",
       properties: {

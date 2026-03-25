@@ -2429,7 +2429,9 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
             args: [mediaServerPath],
             env: {
               OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
-              BEATOVEN_API_KEY: process.env.BEATOVEN_API_KEY || "",
+              KLING_ACCESS_KEY: process.env.KLING_ACCESS_KEY || "",
+              KLING_SECRET_KEY: process.env.KLING_SECRET_KEY || "",
+              FAL_KEY: process.env.FAL_KEY || "",
               ESSENS_API_TOKEN: process.env.ESSENS_API_TOKEN || "",
               OUTPUT_DIR: outputDir,
             },
