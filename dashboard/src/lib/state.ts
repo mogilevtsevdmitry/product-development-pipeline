@@ -2420,7 +2420,7 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
   // Media agents get access to media-tools MCP (image/video/music generation)
   const MEDIA_AGENTS = new Set(["image-generator", "video-generator", "music-composer"]);
   if (MEDIA_AGENTS.has(agentId)) {
-    const mediaServerPath = path.resolve(process.cwd(), "src", "mcp", "media-server.mjs");
+    const mediaServerPath = path.resolve(process.cwd(), "..", "mcp-servers", "media-generator", "server.js");
     if (fs.existsSync(mediaServerPath)) {
       const mcpConfig = JSON.stringify({
         mcpServers: {
@@ -2431,8 +2431,7 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
               OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
               KLING_ACCESS_KEY: process.env.KLING_ACCESS_KEY || "",
               KLING_SECRET_KEY: process.env.KLING_SECRET_KEY || "",
-              FAL_KEY: process.env.FAL_KEY || "",
-              ESSENS_API_TOKEN: process.env.ESSENS_API_TOKEN || "",
+              BEATOVEN_API_KEY: process.env.BEATOVEN_API_KEY || "",
               OUTPUT_DIR: outputDir,
             },
           },
