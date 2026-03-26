@@ -195,6 +195,81 @@ async function generateVideo({ prompt, duration, aspect_ratio, filename }) {
   };
 }
 
+async function generateVideoFromImage({ image_url, prompt, duration, aspect_ratio, filename }) {
+  if (!KLING_ACCESS_KEY || !KLING_SECRET_KEY)
+    throw new Error("KLING_ACCESS_KEY / KLING_SECRET_KEY не заданы");
+
+  log(`[generate_video_from_image] image="${image_url}", prompt="${prompt}"`);
+
+  const now = Math.floor(Date.now() / 1000);
+  const jwt = createJwt(
+    { iss: KLING_ACCESS_KEY, exp: now + 1800, nbf: now - 5, iat: now },
+    KLING_SECRET_KEY,
+  );
+  const authHeaders = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${jwt}`,
+  };
+
+  // 1. Create image-to-video task
+  const createRes = await fetch("https://api.klingai.com/v1/videos/image2video", {
+    method: "POST",
+    headers: authHeaders,
+    body: JSON.stringify({
+      model_name: "kling-v1",
+      image: image_url,
+      prompt: prompt || "",
+      duration: duration || "5",
+      aspect_ratio: aspect_ratio || "9:16",
+    }),
+  });
+
+  if (!createRes.ok) {
+    const err = await createRes.text();
+    throw new Error(`Kling image2video ошибка ${createRes.status}: ${err}`);
+  }
+
+  const createJson = await createRes.json();
+  if (createJson.code !== 0) throw new Error(`Kling image2video ошибка: ${JSON.stringify(createJson)}`);
+
+  const taskId = createJson.data?.task_id;
+  if (!taskId) throw new Error("Нет task_id в ответе Kling API");
+  log(`[generate_video_from_image] task_id=${taskId}, polling...`);
+
+  // 2. Poll
+  const pollUrl = `https://api.klingai.com/v1/videos/image2video/${taskId}`;
+  const result = await poll(
+    pollUrl,
+    { Authorization: `Bearer ${jwt}` },
+    (json) => {
+      const status = json.data?.task_status;
+      log(`[generate_video_from_image] status=${status}`);
+      if (status === "failed") throw new Error(`Генерация видео не удалась: ${JSON.stringify(json.data)}`);
+      if (status === "succeed") {
+        const videoUrl = json.data?.task_result?.videos?.[0]?.url;
+        if (!videoUrl) throw new Error("Нет URL видео в результате");
+        return videoUrl;
+      }
+      return null;
+    },
+    { interval: 10_000, timeout: 300_000 },
+  );
+
+  // 3. Download
+  const fname = (filename || uniqueName("video-i2v", "")) + ".mp4";
+  const filePath = path.resolve(OUTPUT_DIR, fname);
+  const bytes = await downloadFile(result, filePath);
+
+  log(`[generate_video_from_image] saved ${filePath} (${fileSizeHuman(bytes)})`);
+
+  return {
+    success: true,
+    file_path: filePath,
+    file_size: fileSizeHuman(bytes),
+    metadata: { image_url, prompt, duration, aspect_ratio, format: "mp4", task_id: taskId },
+  };
+}
+
 async function generateMusic({ prompt, duration, filename }) {
   if (!BEATOVEN_API_KEY) throw new Error("BEATOVEN_API_KEY не задан");
 
@@ -327,6 +402,41 @@ server.tool(
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     } catch (e) {
       log(`[generate_video] ERROR: ${e.message}`);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }) }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  "generate_video_from_image",
+  "Генерация видео из изображения (Kling AI image-to-video). Анимирует статичное изображение. ПРЕДПОЧТИТЕЛЬНЫЙ способ для видео с реальными товарами — передай URL изображения товара из каталога ESSENS.",
+  {
+    image_url: z.string().describe("URL изображения-референса (например, фото товара из каталога ESSENS)"),
+    prompt: z.string().describe("Описание желаемого движения/анимации на английском. Например: 'Slow gentle rotation, soft studio lighting' или 'Hand picks up the product, shows label to camera'"),
+    duration: z
+      .enum(["5", "10"])
+      .optional()
+      .default("5")
+      .describe("Длительность видео в секундах"),
+    aspect_ratio: z
+      .enum(["16:9", "9:16", "1:1"])
+      .optional()
+      .default("9:16")
+      .describe("Соотношение сторон видео"),
+    filename: z
+      .string()
+      .optional()
+      .describe("Имя файла без расширения"),
+  },
+  async (params) => {
+    try {
+      const result = await generateVideoFromImage(params);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (e) {
+      log(`[generate_video_from_image] ERROR: ${e.message}`);
       return {
         content: [{ type: "text", text: JSON.stringify({ success: false, error: e.message }) }],
         isError: true,
