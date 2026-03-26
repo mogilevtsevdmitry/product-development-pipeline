@@ -18,7 +18,21 @@ export default function RunHistoryView({
   const [selectedRun, setSelectedRun] = useState<number | null>(null);
   const [viewingArtifact, setViewingArtifact] = useState<string | null>(null);
 
-  const sorted = [...runHistory].sort((a, b) => b.run_number - a.run_number);
+  // Fix run numbers: assign sequential numbers if they're all the same
+  const fixed = runHistory.map((run, idx) => ({
+    ...run,
+    run_number: run.run_number || idx + 1,
+    _index: idx,
+  }));
+  // Deduplicate run_numbers by reassigning if duplicates exist
+  const seenNumbers = new Set<number>();
+  for (const run of fixed) {
+    if (seenNumbers.has(run.run_number)) {
+      run.run_number = fixed.indexOf(run) + 1;
+    }
+    seenNumbers.add(run.run_number);
+  }
+  const sorted = [...fixed].sort((a, b) => b.run_number - a.run_number);
 
   function formatDuration(ms?: number): string {
     if (!ms) return "—";
@@ -68,7 +82,7 @@ export default function RunHistoryView({
 
             return (
               <button
-                key={run.run_number}
+                key={`run-${run._index}-${run.run_number}`}
                 onClick={() =>
                   setSelectedRun(isSelected ? null : run.run_number)
                 }

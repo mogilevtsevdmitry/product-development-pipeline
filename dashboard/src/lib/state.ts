@@ -2158,7 +2158,9 @@ function finalizeAgent(
   state.updated_at = new Date().toISOString();
 
   // Save run history record
-  const currentRunNum = state.agents[agentId].current_run || 1;
+  const existingHistory = state.agents[agentId].run_history || [];
+  const currentRunNum = existingHistory.length + 1;
+  state.agents[agentId].current_run = currentRunNum;
   const runDirRel = `runs/${String(currentRunNum).padStart(3, "0")}`;
   const runDirAbs = path.join(outputDir, runDirRel);
   const runRecord: import("./types").AgentRunRecord = {
