@@ -257,7 +257,11 @@ export function getProjectState(id: string): ProjectState | null {
 
       // Add run_history record for auto-recovered agent
       if (!agent.run_history) agent.run_history = [];
-      const runNum = (agent.current_run || agent.run_history.length) + 1;
+      let runNum = (agent.current_run || agent.run_history.length) + 1;
+      try {
+        const savedRunNum = parseInt(fs.readFileSync(path.join(outDir, "_current_run"), "utf-8").trim());
+        if (savedRunNum > 0) runNum = savedRunNum;
+      } catch { /* fallback */ }
       agent.current_run = runNum;
       agent.run_history.push({
         run_number: runNum,
@@ -334,7 +338,8 @@ export function getProjectState(id: string): ProjectState | null {
   }
 
   // Fix stale "running" status: if all agents done but pipeline still shows running
-  if (state.status === "running" && state.pipeline_graph.nodes.length > 0) {
+  // Skip for debate projects — they manage their own completion via debate.status
+  if (state.status === "running" && state.pipeline_type !== "debate" && state.pipeline_graph.nodes.length > 0) {
     const allDone = state.pipeline_graph.nodes.every((n) => {
       const s = state.agents[n]?.status;
       return s === "completed" || s === "skipped";
@@ -368,6 +373,28 @@ export function getProjectState(id: string): ProjectState | null {
         }
       }
     }
+  }
+
+  // Detect web project by scanning package.json for web frameworks
+  const WEB_FRAMEWORKS = new Set([
+    "express", "next", "react", "vue", "nuxt", "vite", "fastify",
+    "@nestjs/core", "hono", "koa", "svelte", "@sveltejs/kit", "astro", "remix",
+  ]);
+  try {
+    if (state.project_path) {
+      const pkgPath = path.join(state.project_path, "package.json");
+      if (fs.existsSync(pkgPath)) {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+        const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+        state.is_web_project = Object.keys(allDeps).some((d) => WEB_FRAMEWORKS.has(d));
+      } else {
+        state.is_web_project = false;
+      }
+    } else {
+      state.is_web_project = false;
+    }
+  } catch {
+    state.is_web_project = false;
   }
 
   return state;
@@ -478,7 +505,9 @@ export function createProject(
   name: string,
   description: string,
   mode: "auto" | "human_approval" = "auto",
-  projectPath?: string
+  projectPath?: string,
+  pipelineType: "standard" | "debate" = "standard",
+  debateRoles?: { analyst: string; producer: string; controller: string }
 ): ProjectState {
   ensureDir(STATE_DIR);
   ensureDir(PROJECTS_DIR);
@@ -513,11 +542,63 @@ export function createProject(
     pipeline_graph: { nodes: [], edges: [], parallel_groups: [] },
     agents: {},
     gate_decisions: {},
-    blocks: [],
+    pipeline_type: pipelineType,
+    ...(pipelineType === "debate" ? {
+      debate: {
+        task: description || name,
+        roles: debateRoles || { analyst: "product-owner", producer: "business-analyst", controller: "qa-engineer" },
+        current_round: 0,
+        max_rounds: 3,
+        status: "idle" as const,
+        rounds: [],
+      },
+    } : {}),
+    blocks: pipelineType === "debate" && debateRoles ? [
+      {
+        id: "analyst",
+        name: "Аналитик",
+        description: "Направляет, приоритизирует, определяет фокус",
+        agents: [debateRoles.analyst],
+        edges: [] as [string, string][],
+        depends_on: [] as string[],
+        requires_approval: false,
+      },
+      {
+        id: "producer",
+        name: "Производитель",
+        description: "Создаёт артефакт по задаче",
+        agents: [debateRoles.producer],
+        edges: [] as [string, string][],
+        depends_on: ["analyst"],
+        requires_approval: false,
+      },
+      {
+        id: "controller",
+        name: "Контролёр",
+        description: "Проверяет и даёт feedback",
+        agents: [debateRoles.controller],
+        edges: [] as [string, string][],
+        depends_on: ["producer"],
+        requires_approval: false,
+      },
+    ] : [],
     schema_version: 2,
     current_cycle: 1,
     cycle_history: [],
   };
+
+  // Initialize agent states for debate projects
+  if (pipelineType === "debate" && debateRoles) {
+    for (const agentId of [debateRoles.analyst, debateRoles.producer, debateRoles.controller]) {
+      state.agents[agentId] = {
+        status: "pending",
+        started_at: null,
+        completed_at: null,
+        artifacts: [],
+        error: null,
+      };
+    }
+  }
 
   // Сохраняем state JSON
   const filePath = path.join(STATE_DIR, `${projectId}.json`);
@@ -1156,6 +1237,9 @@ const AGENT_PHASES: Record<string, string> = {
  * Условия: все зависимости completed + не заблокирован gate-точкой.
  */
 function findReadyAgents(state: ProjectState): string[] {
+  // Debate projects manage their own execution via /api/state/[id]/debate
+  if (state.pipeline_type === "debate") return [];
+
   const { computeAllBlockStatuses } = require("./types") as typeof import("./types");
 
   // If we have blocks, use block-aware logic
@@ -1166,10 +1250,28 @@ function findReadyAgents(state: ProjectState): string[] {
     for (const block of state.blocks) {
       const bs = blockStatuses[block.id];
 
-      // Skip blocks that are blocked, awaiting approval, or completed
-      if (bs === "blocked" || bs === "awaiting_approval" || bs === "completed") continue;
+      // Auto-advance: automatically approve blocks waiting for approval
+      if (bs === "awaiting_approval" && state.auto_advance) {
+        block.approval = {
+          decision: "go",
+          decided_by: "auto_advance",
+          timestamp: new Date().toISOString(),
+          notes: "Автоматическое одобрение (auto_advance включён)",
+        };
+        state.updated_at = new Date().toISOString();
+        // Recalculate statuses after auto-approval
+        const newStatuses = computeAllBlockStatuses(state.blocks, state.agents);
+        const newBs = newStatuses[block.id];
+        if (newBs === "completed") continue;
+        if (newBs === "blocked") break;
+        // Fall through to process agents in this block
+      } else if (bs === "completed") {
+        continue; // Skip completed blocks
+      } else if (bs === "blocked" || bs === "awaiting_approval") {
+        break; // STOP — can't proceed past a blocked/awaiting block
+      }
 
-      // For pending/running/failed blocks: find ready agents within
+      // This is the first active block — collect ready agents within it
       for (const agentId of block.agents) {
         const agent = state.agents[agentId];
         if (!agent || agent.status !== "pending") continue;
@@ -1184,6 +1286,8 @@ function findReadyAgents(state: ProjectState): string[] {
         );
         if (allDone) ready.push(agentId);
       }
+      // Strict sequential: only process ONE block at a time
+      break;
     }
     return ready;
   }
@@ -1687,6 +1791,9 @@ const GATES: {
  * Returns gate name if pipeline should pause, null otherwise.
  */
 function checkGates(state: ProjectState): string | null {
+  // Auto-advance: skip all gates
+  if (state.auto_advance) return null;
+
   for (const gate of GATES) {
     // Skip if gate already decided
     if (state.gate_decisions[gate.name]) continue;
@@ -2159,7 +2266,12 @@ function finalizeAgent(
 
   // Save run history record
   const existingHistory = state.agents[agentId].run_history || [];
-  const currentRunNum = existingHistory.length + 1;
+  // Use _current_run sidecar file written by spawnAgent (source of truth for run number)
+  let currentRunNum = existingHistory.length + 1;
+  try {
+    const savedRunNum = parseInt(fs.readFileSync(path.join(outputDir, "_current_run"), "utf-8").trim());
+    if (savedRunNum > 0) currentRunNum = savedRunNum;
+  } catch { /* fallback to history length */ }
   state.agents[agentId].current_run = currentRunNum;
   const runDirRel = `runs/${String(currentRunNum).padStart(3, "0")}`;
   const runDirAbs = path.join(outputDir, runDirRel);
@@ -2202,12 +2314,23 @@ function finalizeAgent(
       // Feedback reset some agents to pending — pipeline is still running
       state.status = "running";
     } else {
-      // Check pipeline completion
-      const allDone = state.pipeline_graph.nodes.every((n) => {
-        const s = state.agents[n]?.status;
-        return s === "completed" || s === "skipped";
-      });
-      if (allDone) state.status = "completed";
+      // Check pipeline completion (skip for debate projects)
+      if (state.pipeline_type !== "debate") {
+        let allDone = false;
+        if (state.blocks?.length) {
+          // Block-based: all blocks must be completed
+          const { computeAllBlockStatuses } = require("./types") as typeof import("./types");
+          const bs = computeAllBlockStatuses(state.blocks, state.agents);
+          allDone = state.blocks.every((b) => bs[b.id] === "completed");
+        } else if (state.pipeline_graph.nodes.length > 0) {
+          // Legacy node-based
+          allDone = state.pipeline_graph.nodes.every((n) => {
+            const s = state.agents[n]?.status;
+            return s === "completed" || s === "skipped";
+          });
+        }
+        if (allDone) state.status = "completed";
+      }
     }
   }
 
@@ -2355,6 +2478,10 @@ function spawnAgent(id: string, agentId: string, state: ProjectState): void {
   // Track current run in state
   if (!state.agents[agentId].run_history) state.agents[agentId].run_history = [];
   state.agents[agentId].current_run = nextRunNum;
+
+  // Persist current_run to a sidecar file so finalizeAgent can read the correct run number
+  // (state passed to spawnAgent is not saved back to disk after this point)
+  fs.writeFileSync(path.join(outputDir, "_current_run"), String(nextRunNum), "utf-8");
 
   const tmpFile = prepareAgentPrompt(agentId, state, outputDir);
 
@@ -2671,7 +2798,7 @@ export function runNextAgent(id: string): {
       return { ok: true, error: "Агенты уже работают, ожидаем завершения" };
     }
 
-    const allDone = state.pipeline_graph.nodes.every((n) => {
+    const allDone = state.pipeline_type !== "debate" && state.pipeline_graph.nodes.length > 0 && state.pipeline_graph.nodes.every((n) => {
       const s = state.agents[n]?.status;
       return s === "completed" || s === "skipped";
     });
@@ -3212,6 +3339,31 @@ export function updateSchedule(
   if (!state) return false;
 
   state.schedule = schedule as any;
+  state.updated_at = new Date().toISOString();
+
+  const filePath = path.join(STATE_DIR, `${id}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  return true;
+}
+
+export function updateBlockEdges(
+  id: string,
+  blockId: string,
+  edges: [string, string][]
+): boolean {
+  const state = getProjectState(id);
+  if (!state || !state.blocks) return false;
+
+  const block = state.blocks.find((b) => b.id === blockId);
+  if (!block) return false;
+
+  // Validate: all edge nodes must be in this block
+  const agentSet = new Set(block.agents);
+  for (const [src, tgt] of edges) {
+    if (!agentSet.has(src) || !agentSet.has(tgt)) return false;
+  }
+
+  block.edges = edges;
   state.updated_at = new Date().toISOString();
 
   const filePath = path.join(STATE_DIR, `${id}.json`);

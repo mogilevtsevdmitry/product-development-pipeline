@@ -61,39 +61,39 @@ DEFAULT_FULL_GRAPH: Dict[str, Any] = {
         "data-analyst",
     ],
     "edges": [
-        # Статическая цепочка
+        # Статическая цепочка (small docs, pass everything)
         ["problem-researcher", "market-researcher"],
         ["market-researcher", "product-owner"],
         # Gate 1 → Pipeline Architect
         ["product-owner", "pipeline-architect"],
-        # Параллельные ветки после Pipeline Architect
+        # Параллельные ветки после Pipeline Architect (small docs from PA)
         ["pipeline-architect", "business-analyst"],
         ["pipeline-architect", "system-architect"],
         ["pipeline-architect", "ux-ui-designer"],
         ["pipeline-architect", "legal-compliance"],
-        # BA → Tech Lead
-        ["business-analyst", "tech-lead"],
+        # BA → Tech Lead (documentation artifacts only)
+        ["business-analyst", "tech-lead", ["requirements.md", "business-analyst-output.md"]],
         # Gate 2 → Tech Lead
-        ["system-architect", "tech-lead"],
-        ["ux-ui-designer", "tech-lead"],
-        # Tech Lead → параллельная разработка
-        ["tech-lead", "backend-developer"],
-        ["tech-lead", "frontend-developer"],
-        ["tech-lead", "devops-engineer"],
-        # Разработка → Качество
-        ["backend-developer", "qa-engineer"],
-        ["frontend-developer", "qa-engineer"],
-        ["backend-developer", "security-engineer"],
-        ["frontend-developer", "security-engineer"],
-        # Gate 3 → Release Manager
+        ["system-architect", "tech-lead", ["architecture.md", "api_contracts.md", "db_schema.md"]],
+        ["ux-ui-designer", "tech-lead", ["design_system.md", "wireframes.md"]],
+        # Tech Lead → параллельная разработка (tasks breakdown)
+        ["tech-lead", "backend-developer", ["tech-lead-output.md"]],
+        ["tech-lead", "frontend-developer", ["tech-lead-output.md"]],
+        ["tech-lead", "devops-engineer", ["tech-lead-output.md"]],
+        # Разработка → Качество (summaries only, not code)
+        ["backend-developer", "qa-engineer", ["backend-developer-output.md"]],
+        ["frontend-developer", "qa-engineer", ["frontend-developer-output.md"]],
+        ["backend-developer", "security-engineer", ["backend-developer-output.md"]],
+        ["frontend-developer", "security-engineer", ["frontend-developer-output.md"]],
+        # Gate 3 → Release Manager (pass everything)
         ["qa-engineer", "release-manager"],
         ["security-engineer", "release-manager"],
         ["devops-engineer", "release-manager"],
-        # Release → Marketing
+        # Release → Marketing (pass everything)
         ["release-manager", "product-marketer"],
         ["product-marketer", "smm-manager"],
         ["product-marketer", "content-creator"],
-        # Release → Feedback
+        # Release → Feedback (pass everything)
         ["release-manager", "customer-support"],
         ["release-manager", "data-analyst"],
     ],
@@ -172,15 +172,15 @@ def _build_mvp_pipeline(brief: Dict[str, Any]) -> Dict[str, Any]:
         "qa-engineer",
     ]
 
-    edges: List[List[str]] = [
+    edges: List[list] = [
         ["problem-researcher", "market-researcher"],
         ["market-researcher", "product-owner"],
         ["product-owner", "pipeline-architect"],
         ["pipeline-architect", "business-analyst"],
-        ["business-analyst", "backend-developer"],
-        ["business-analyst", "frontend-developer"],
-        ["backend-developer", "qa-engineer"],
-        ["frontend-developer", "qa-engineer"],
+        ["business-analyst", "backend-developer", ["requirements.md", "business-analyst-output.md"]],
+        ["business-analyst", "frontend-developer", ["requirements.md", "business-analyst-output.md"]],
+        ["backend-developer", "qa-engineer", ["backend-developer-output.md"]],
+        ["frontend-developer", "qa-engineer", ["frontend-developer-output.md"]],
         ["qa-engineer", "devops-engineer"],
     ]
 
@@ -218,7 +218,7 @@ def _build_full_pipeline(
     """
     # Начинаем с полного графа и убираем ненужное
     nodes: List[str] = list(DEFAULT_FULL_GRAPH["nodes"])
-    edges: List[List[str]] = [list(e) for e in DEFAULT_FULL_GRAPH["edges"]]
+    edges: List[list] = [list(e) for e in DEFAULT_FULL_GRAPH["edges"]]
     parallel_groups: List[List[str]] = [
         list(g) for g in DEFAULT_FULL_GRAPH["parallel_groups"]
     ]

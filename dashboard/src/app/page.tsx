@@ -31,6 +31,29 @@ export default function HomePage() {
   const [formDesc, setFormDesc] = useState("");
   const [formMode, setFormMode] = useState<"auto" | "human_approval">("auto");
   const [formProjectPath, setFormProjectPath] = useState("");
+  const [formType, setFormType] = useState<"standard" | "debate">("standard");
+  const [formAnalyst, setFormAnalyst] = useState("product-owner");
+  const [formProducer, setFormProducer] = useState("content-creator");
+  const [formController, setFormController] = useState("qa-engineer");
+
+  const DEBATE_AGENT_OPTIONS = [
+    { id: "product-owner", name: "Product Owner" },
+    { id: "business-analyst", name: "Business Analyst" },
+    { id: "ux-ui-designer", name: "UX/UI Designer" },
+    { id: "system-architect", name: "System Architect" },
+    { id: "tech-lead", name: "Tech Lead" },
+    { id: "backend-developer", name: "Backend Developer" },
+    { id: "frontend-developer", name: "Frontend Developer" },
+    { id: "devops-engineer", name: "DevOps Engineer" },
+    { id: "qa-engineer", name: "QA Engineer" },
+    { id: "security-engineer", name: "Security Engineer" },
+    { id: "release-manager", name: "Release Manager" },
+    { id: "product-marketer", name: "Product Marketer" },
+    { id: "smm-manager", name: "SMM Manager" },
+    { id: "content-creator", name: "Content Creator" },
+    { id: "customer-support", name: "Customer Support" },
+    { id: "data-analyst", name: "Data Analyst" },
+  ];
 
   async function loadProjects() {
     try {
@@ -63,6 +86,10 @@ export default function HomePage() {
           description: formDesc,
           mode: formMode,
           project_path: formProjectPath || undefined,
+          pipeline_type: formType,
+          ...(formType === "debate" ? {
+            debate_roles: { analyst: formAnalyst, producer: formProducer, controller: formController },
+          } : {}),
         }),
       });
 
@@ -181,6 +208,73 @@ export default function HomePage() {
                 </button>
               </div>
             </div>
+
+            {/* Тип проекта */}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Тип проекта
+              </label>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setFormType("standard")}
+                  className={`flex-1 px-4 py-3 rounded-lg border text-sm text-left transition-colors ${
+                    formType === "standard"
+                      ? "border-blue-500 bg-blue-500/10 text-blue-400"
+                      : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
+                  }`}
+                >
+                  <div className="font-medium mb-1">🏗 Пайплайн</div>
+                  <div className="text-xs text-gray-500">
+                    Полный цикл: от исследования до релиза с блоками агентов
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormType("debate")}
+                  className={`flex-1 px-4 py-3 rounded-lg border text-sm text-left transition-colors ${
+                    formType === "debate"
+                      ? "border-amber-500 bg-amber-500/10 text-amber-400"
+                      : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
+                  }`}
+                >
+                  <div className="font-medium mb-1">⚡ Штаб агентов</div>
+                  <div className="text-xs text-gray-500">
+                    3 агента спорят и улучшают результат за 3 раунда
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Debate role selectors */}
+            {formType === "debate" && (
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Назначение агентов на роли
+                </label>
+                <div className="grid grid-cols-3 gap-3">
+                  {([
+                    { role: "analyst", label: "🔭 Аналитик", desc: "Направляет, приоритизирует", value: formAnalyst, setter: setFormAnalyst },
+                    { role: "producer", label: "⚒️ Производитель", desc: "Создаёт артефакт", value: formProducer, setter: setFormProducer },
+                    { role: "controller", label: "🔍 Контролёр", desc: "Проверяет, даёт feedback", value: formController, setter: setFormController },
+                  ] as const).map(({ role, label, desc, value, setter }) => (
+                    <div key={role} className="rounded-lg border border-gray-700 bg-gray-800 p-3">
+                      <p className="text-sm font-medium text-gray-300 mb-1">{label}</p>
+                      <p className="text-xs text-gray-500 mb-2">{desc}</p>
+                      <select
+                        value={value}
+                        onChange={(e) => setter(e.target.value)}
+                        className="w-full px-2 py-1.5 bg-gray-900 border border-gray-700 rounded text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      >
+                        {DEBATE_AGENT_OPTIONS.map((agent) => (
+                          <option key={agent.id} value={agent.id}>{agent.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Путь к проекту */}
             <div>

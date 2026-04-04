@@ -24,6 +24,7 @@ def run_agent(
     agent_id: str,
     project_id: str,
     input_artifacts: List[str],
+    project_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Запускает агента и возвращает результат выполнения.
@@ -40,6 +41,7 @@ def run_agent(
         agent_id: Идентификатор агента из реестра.
         project_id: Идентификатор проекта.
         input_artifacts: Список путей к входным артефактам (относительно projects/).
+        project_path: Путь к директории проекта (для чтения кода из ФС).
 
     Returns:
         Словарь с результатом:
@@ -72,6 +74,7 @@ def run_agent(
             rules=rules,
             context=context,
             output_dir=str(output_dir),
+            project_path=project_path,
         )
 
         # Запускаем агента через Claude Code
@@ -202,6 +205,7 @@ def _build_full_prompt(
     rules: str,
     context: str,
     output_dir: str,
+    project_path: Optional[str] = None,
 ) -> str:
     """
     Формирует полный промпт для агента.
@@ -212,6 +216,7 @@ def _build_full_prompt(
         rules: Содержимое rules.md.
         context: Контекст из входных артефактов.
         output_dir: Путь для сохранения результатов.
+        project_path: Путь к директории проекта (для чтения кода из ФС).
 
     Returns:
         Полный промпт.
@@ -223,6 +228,14 @@ def _build_full_prompt(
 
     if context:
         parts.append(f"\n\n# Входные данные\n\n{context}")
+
+    if project_path:
+        parts.append(
+            f"\n\n# Директория проекта\n\n"
+            f"Исходный код проекта находится в: {project_path}\n"
+            f"Читай код из файловой системы по необходимости. "
+            f"В промпте передана только документация (контракты, требования, архитектура)."
+        )
 
     parts.append(
         f"\n\n# Инструкции по сохранению\n\n"
@@ -310,7 +323,11 @@ def get_input_artifacts_for_agent(
     """
     Определяет входные артефакты для агента на основе состояния пайплайна.
 
-    Собирает артефакты от всех завершённых зависимостей агента.
+    Собирает артефакты от завершённых зависимостей с учётом фильтров.
+    Фильтры задаются третьим элементом в edge:
+    - ["a", "b"] — все артефакты (обратная совместимость)
+    - ["a", "b", ["file.md"]] — только указанные файлы
+    - ["a", "b", []] — ничего не передавать
 
     Args:
         agent_id: Идентификатор агента.
@@ -322,16 +339,30 @@ def get_input_artifacts_for_agent(
     graph = state.get("pipeline_graph", {})
     agents_state = state.get("agents", {})
 
-    # Находим зависимости (входящие рёбра)
-    dependencies: List[str] = [
-        edge[0] for edge in graph.get("edges", [])
-        if edge[1] == agent_id
-    ]
-
     artifacts: List[str] = []
-    for dep_id in dependencies:
+    for edge in graph.get("edges", []):
+        if edge[1] != agent_id:
+            continue
+
+        dep_id = edge[0]
         dep_state = agents_state.get(dep_id, {})
-        if dep_state.get("status") == "completed":
-            artifacts.extend(dep_state.get("artifacts", []))
+        if dep_state.get("status") != "completed":
+            continue
+
+        dep_artifacts = dep_state.get("artifacts", [])
+
+        # Фильтрация: если есть третий элемент в edge
+        if len(edge) > 2:
+            allowed = edge[2]
+            if not allowed:
+                # Пустой список — ничего не передаём
+                continue
+            # Фильтруем по имени файла
+            dep_artifacts = [
+                a for a in dep_artifacts
+                if any(a.endswith(f) for f in allowed)
+            ]
+
+        artifacts.extend(dep_artifacts)
 
     return artifacts

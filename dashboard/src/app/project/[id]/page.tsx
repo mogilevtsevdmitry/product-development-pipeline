@@ -6,6 +6,8 @@ import StatusBadge from "@/components/StatusBadge";
 import BlockSidebar from "@/components/BlockSidebar";
 import BlockView from "@/components/BlockView";
 import ProjectChat from "@/components/ProjectChat";
+import PreviewPanel from "@/components/PreviewPanel";
+import DebateView from "@/components/DebateView";
 import type { ProjectState, ProjectStatus, BlockStatus, PipelineBlock } from "@/lib/types";
 import { computeAllBlockStatuses } from "@/lib/types";
 
@@ -176,6 +178,22 @@ export default function ProjectPage({
     (a) => a.status === "completed" || a.status === "skipped"
   ).length;
 
+  // Aggregate tokens & cost
+  const projectStats = Object.values(state.agents).reduce(
+    (acc, a) => {
+      const u = a.total_usage ?? a.usage;
+      if (u) {
+        acc.tokens += u.input_tokens + u.output_tokens;
+        acc.cost += u.cost_usd;
+      }
+      return acc;
+    },
+    { tokens: 0, cost: 0 }
+  );
+
+  const formatTokens = (n: number) =>
+    n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(1)}K` : String(n);
+
   const handleBlockApproval = async (blockId: string, decision: "go" | "stop", notes?: string) => {
     setActionLoading("block_approval");
     try {
@@ -215,8 +233,8 @@ export default function ProjectPage({
             )}
           </span>
 
-          {/* Start pipeline */}
-          {state.status === "created" && (
+          {/* Start pipeline — hide for debate projects */}
+          {state.pipeline_type !== "debate" && state.status === "created" && (
             <button
               onClick={() => sendAction("start_pipeline")}
               disabled={actionLoading !== null}
@@ -226,8 +244,8 @@ export default function ProjectPage({
             </button>
           )}
 
-          {/* Run next */}
-          {(state.status === "running" || state.status === "paused") && (
+          {/* Run next — hide for debate projects (they use debate API) */}
+          {state.pipeline_type !== "debate" && (state.status === "running" || state.status === "paused") && (
             <button
               onClick={() => sendAction("run_next")}
               disabled={actionLoading !== null}
@@ -238,7 +256,7 @@ export default function ProjectPage({
           )}
 
           {/* Restart cycle */}
-          {(state.status === "completed" || state.status === "failed" || state.status === "running" || state.status === "paused") && (
+          {state.pipeline_type !== "debate" && (state.status === "completed" || state.status === "failed" || state.status === "running" || state.status === "paused") && (
             <button
               onClick={() => sendAction("restart_cycle")}
               disabled={actionLoading !== null}
@@ -249,7 +267,7 @@ export default function ProjectPage({
           )}
 
           {/* Pause */}
-          {state.status === "running" && (
+          {state.pipeline_type !== "debate" && state.status === "running" && (
             <button
               onClick={() => sendAction("pause")}
               disabled={actionLoading !== null}
@@ -260,7 +278,7 @@ export default function ProjectPage({
           )}
 
           {/* Resume */}
-          {(state.status === "paused" || state.status === "paused_at_gate" || state.status === "stopped" || state.status === "failed" || state.status === "completed") && (
+          {state.pipeline_type !== "debate" && (state.status === "paused" || state.status === "paused_at_gate" || state.status === "stopped" || state.status === "failed" || state.status === "completed") && (
             <button
               onClick={() => sendAction("resume")}
               disabled={actionLoading !== null}
@@ -280,6 +298,19 @@ export default function ProjectPage({
             }}
           >
             {state.mode === "auto" ? "👤 Ручной" : "🤖 Авто"}
+          </button>
+
+          {/* Auto-advance toggle */}
+          <button
+            onClick={() => sendAction("set_auto_advance", { enabled: !state.auto_advance })}
+            disabled={actionLoading !== null}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors disabled:opacity-50 ${
+              state.auto_advance
+                ? "border-amber-500 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
+                : "border-orange-700/50 bg-orange-500/10 text-orange-400 hover:bg-orange-500/20"
+            }`}
+          >
+            {state.auto_advance ? "⚡ Автопилот" : "⏸ Автопилот"}
           </button>
 
           {/* Schedule toggle */}
@@ -329,6 +360,32 @@ export default function ProjectPage({
         </div>
       </header>
 
+      {/* Project info bar */}
+      <div className="border-b border-gray-800/50 bg-gray-900/50 px-6 py-2 flex items-center gap-6 text-xs text-gray-500 shrink-0">
+        {state.project_path && (
+          <span className="flex items-center gap-1.5" title={state.project_path}>
+            <span className="text-gray-600">Путь:</span>
+            <span className="text-gray-400 font-mono truncate max-w-[400px]">{state.project_path}</span>
+          </span>
+        )}
+        {state.description && (
+          <span className="flex items-center gap-1.5 truncate max-w-[400px]" title={state.description}>
+            <span className="text-gray-600">Описание:</span>
+            <span className="text-gray-400">{state.description}</span>
+          </span>
+        )}
+        <span className="ml-auto flex items-center gap-4">
+          <span>
+            <span className="text-gray-600">Токены: </span>
+            <span className="text-gray-300 font-medium">{formatTokens(projectStats.tokens)}</span>
+          </span>
+          <span>
+            <span className="text-gray-600">Стоимость: </span>
+            <span className="text-gray-300 font-medium">${projectStats.cost.toFixed(2)}</span>
+          </span>
+        </span>
+      </div>
+
       {/* Running agent indicator - full width bar */}
       {runningAgents.length > 0 && (
         <div className="bg-blue-950/30 border-b border-blue-800/40 px-6 py-2 flex items-center gap-3 shrink-0">
@@ -363,7 +420,17 @@ export default function ProjectPage({
         />
 
         <main className="flex-1 overflow-y-auto p-6">
-          {selectedBlock && selectedBlockStatus ? (
+          <PreviewPanel projectId={state.project_id} state={state} />
+
+          {state.pipeline_type === "debate" ? (
+            <DebateView projectId={state.project_id} state={state} />
+          ) : state.blocks.length === 0 && state.description ? (
+            <div className="flex flex-col items-center justify-center h-full text-gray-500 gap-3">
+              <div className="animate-spin h-6 w-6 border-2 border-blue-400 border-t-transparent rounded-full" />
+              <p className="text-sm">Генерация пайплайна из описания проекта...</p>
+              <p className="text-xs text-gray-600">Claude анализирует описание и подбирает агентов</p>
+            </div>
+          ) : selectedBlock && selectedBlockStatus ? (
             <BlockView
               block={selectedBlock}
               agents={state.agents}
@@ -371,6 +438,9 @@ export default function ProjectPage({
               blockStatus={selectedBlockStatus}
               prevBlockName={depBlockNames}
               onApproval={handleBlockApproval}
+              onAddAgent={(blockId, agentId) => sendAction("add_agent_to_block", { block_id: blockId, agent_id: agentId })}
+              onRemoveAgent={(blockId, agentId) => sendAction("remove_agent_from_block", { block_id: blockId, agent_id: agentId })}
+              onUpdateEdges={(blockId, edges) => sendAction("update_block_edges", { block_id: blockId, edges })}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-gray-500">

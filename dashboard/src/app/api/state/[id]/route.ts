@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getProjectState,
+  saveProjectState,
   resolveGate,
   switchMode,
   pauseProject,
@@ -25,6 +26,7 @@ import {
   restartCycle,
   updateSchedule,
   updateBlockDeps,
+  updateBlockEdges,
 } from "@/lib/state";
 import type { GateType, GateDecisionValue, PipelineMode } from "@/lib/types";
 
@@ -53,6 +55,15 @@ export async function POST(
   const body = await request.json();
 
   // --- Действия над проектом ---
+
+  if (body.action === "set_auto_advance") {
+    const st = getProjectState(id);
+    if (!st) return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
+    st.auto_advance = !!body.enabled;
+    st.updated_at = new Date().toISOString();
+    saveProjectState(id, st);
+    return NextResponse.json({ ok: true });
+  }
 
   if (body.action === "switch_mode" && body.mode) {
     const ok = switchMode(id, body.mode as PipelineMode);
@@ -179,6 +190,12 @@ export async function POST(
   if (body.action === "update_schedule" && body.schedule) {
     const ok = updateSchedule(id, body.schedule);
     if (!ok) return NextResponse.json({ error: "Не удалось обновить расписание" }, { status: 400 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "update_block_edges" && body.block_id && body.edges) {
+    const ok = updateBlockEdges(id, body.block_id, body.edges);
+    if (!ok) return NextResponse.json({ error: "Не удалось обновить связи агентов" }, { status: 400 });
     return NextResponse.json({ ok: true });
   }
 

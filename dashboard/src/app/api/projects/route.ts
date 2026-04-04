@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import path from "path";
 import { listProjects, createProject } from "@/lib/state";
+import { generateBlocksForProject } from "@/lib/generateBlocks";
 
 export async function GET() {
   const projects = listProjects();
@@ -10,7 +11,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { name, description, mode, project_path } = body;
+    const { name, description, mode, project_path, pipeline_type, debate_roles } = body;
 
     if (!name || typeof name !== "string" || name.trim().length === 0) {
       return NextResponse.json(
@@ -35,8 +36,21 @@ export async function POST(req: NextRequest) {
       name.trim(),
       (description || "").trim(),
       mode === "human_approval" ? "human_approval" : "auto",
-      validatedPath
+      validatedPath,
+      pipeline_type === "debate" ? "debate" : "standard",
+      pipeline_type === "debate" && debate_roles ? debate_roles : undefined
     );
+
+    // Generate blocks from description in background
+    if (description && description.trim() && pipeline_type !== "debate") {
+      setImmediate(() => {
+        try {
+          generateBlocksForProject(state.project_id);
+        } catch (err) {
+          console.error("Failed to generate blocks:", err);
+        }
+      });
+    }
 
     return NextResponse.json(state, { status: 201 });
   } catch (err) {

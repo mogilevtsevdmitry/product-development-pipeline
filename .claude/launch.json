@@ -3,10 +3,11 @@
   "configurations": [
     {
       "name": "dashboard",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": ["-c", "export PATH=/Users/dmitry/.nvm/versions/node/v22.20.0/bin:$PATH && npm run dev"],
       "port": 3344,
-      "cwd": "dashboard"
+      "cwd": "dashboard",
+      "autoPort": false
     }
   ]
 }

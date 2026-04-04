@@ -105,7 +105,7 @@ export interface AgentState {
 
 export interface PipelineGraph {
   nodes: string[];
-  edges: [string, string][];
+  edges: (readonly [string, string] | readonly [string, string, string[]])[];
   parallel_groups: string[][];
 }
 
@@ -258,5 +258,72 @@ export interface ProjectState {
   pipeline_graph: PipelineGraph;
   agents: Record<string, AgentState>;
   gate_decisions: Record<string, GateDecision | null>;
+  // Artifact filters: key = "dep_agent→target_agent", value = allowed filenames or null (pass all)
+  artifact_filters?: Record<string, string[] | null>;
+  // Web project detection & Docker preview
+  is_web_project?: boolean;
+  preview?: PreviewState;
+  // Auto-advance: skip block approvals, run pipeline end-to-end
+  auto_advance?: boolean;
+  // Pipeline type: standard (DAG blocks) or debate (AgentHQ 3-agent cycle)
+  pipeline_type?: "standard" | "debate";
+  debate?: DebateState;
   schema_version: number;
+}
+
+// --- Preview State ---
+
+export type PreviewStatus = "starting" | "running" | "failed" | "stopped";
+
+export interface PreviewState {
+  status: PreviewStatus;
+  url?: string;
+  ports?: { app: number; db?: number };
+  compose_file?: string;
+  started_at?: string;
+  error?: string;
+  logs?: string;
+}
+
+// --- Debate (AgentHQ) State ---
+
+export type DebateStatus = "idle" | "running" | "completed" | "deadlocked";
+export type DebateAgentRole = "analyst" | "producer" | "controller";
+export type DebateVerdict = "sign-off" | "issues" | "blocker";
+
+export interface DebateAgentOutput {
+  output: string;
+  timestamp: string;
+}
+
+export interface DebateAnalystOutput extends DebateAgentOutput {
+  focus: string;
+}
+
+export interface DebateControllerOutput extends DebateAgentOutput {
+  verdict: DebateVerdict;
+  issues?: string[];
+}
+
+export interface DebateRound {
+  round: number;
+  analyst?: DebateAnalystOutput;
+  producer?: DebateAgentOutput;
+  controller?: DebateControllerOutput;
+}
+
+export interface DebateRoles {
+  analyst: string;   // agent id, e.g. "product-owner"
+  producer: string;  // agent id, e.g. "content-creator"
+  controller: string; // agent id, e.g. "qa-engineer"
+}
+
+export interface DebateState {
+  task: string;
+  roles: DebateRoles;
+  current_round: number;
+  max_rounds: number;
+  status: DebateStatus;
+  current_agent?: DebateAgentRole;
+  rounds: DebateRound[];
 }

@@ -8,6 +8,7 @@ import ReasoningView from "@/components/ReasoningView";
 import FeedbackPanel from "@/components/FeedbackPanel";
 import FeedbackReceivedBlock from "@/components/FeedbackReceivedBlock";
 import RunHistoryView from "@/components/RunHistoryView";
+import ArtifactFilters from "@/components/ArtifactFilters";
 import type { ProjectState, AgentStatus, AgentRunRecord } from "@/lib/types";
 
 type Tab = "overview" | "reasoning" | "history";
@@ -97,7 +98,7 @@ function formatDate(iso?: string | null): string {
  */
 function getDependencies(
   agentId: string,
-  edges: [string, string][]
+  edges: (readonly [string, string] | readonly [string, string, string[]])[]
 ): string[] {
   return edges.filter(([, tgt]) => tgt === agentId).map(([src]) => src);
 }
@@ -481,6 +482,13 @@ export default function AgentDetailPage({
             )}
           </div>
         )}
+
+        {/* Artifact Filters */}
+        <ArtifactFilters
+          projectId={state.project_id}
+          agentId={agentKey}
+          state={state}
+        />
 
         {/* Artifacts */}
         <div className="rounded-xl border border-gray-800 bg-gray-900 p-6">

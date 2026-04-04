@@ -95,6 +95,7 @@ export default function BlockSidebar({
   onDeleteBlock,
 }: BlockSidebarProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newBlockName, setNewBlockName] = useState("");
   const [newBlockDesc, setNewBlockDesc] = useState("");
@@ -112,21 +113,39 @@ export default function BlockSidebar({
   };
 
   return (
-    <aside className="w-72 bg-gray-950 border-r border-gray-800 flex flex-col h-full">
+    <aside className={`${collapsed ? "w-12" : "w-72"} bg-gray-950 border-r border-gray-800 flex flex-col h-full transition-all duration-200`}>
       <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">
-          Блоки
-        </h2>
-        <button
-          onClick={() => setShowAddForm(!showAddForm)}
-          className="w-6 h-6 rounded-md flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
-          title="Добавить блок"
-        >
-          <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
-            <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-        </button>
+        {!collapsed && (
+          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">
+            Блоки
+          </h2>
+        )}
+        <div className="flex items-center gap-1">
+          {!collapsed && (
+            <button
+              onClick={() => setShowAddForm(!showAddForm)}
+              className="w-6 h-6 rounded-md flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
+              title="Добавить блок"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
+                <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
+          <button
+            onClick={() => setCollapsed(!collapsed)}
+            className="w-6 h-6 rounded-md flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
+            title={collapsed ? "Развернуть" : "Свернуть"}
+          >
+            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
+              <path d={collapsed ? "M6 3l5 5-5 5" : "M10 3L5 8l5 5"} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </div>
       </div>
+
+      {collapsed ? null : (<>
+      {/* Rest of sidebar content when expanded */}
 
       {/* Add block form */}
       {showAddForm && (
@@ -303,6 +322,7 @@ export default function BlockSidebar({
           </div>
         </div>
       )}
+      </>)}
     </aside>
   );
 }

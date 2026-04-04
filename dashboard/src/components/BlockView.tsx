@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import type {
   PipelineBlock,
@@ -8,6 +8,13 @@ import type {
   BlockStatus,
   PipelineGraph as PipelineGraphType,
 } from "@/lib/types";
+
+interface AvailableAgent {
+  id: string;
+  name: string;
+  phase: string;
+  role: string;
+}
 
 const PipelineGraph = dynamic(() => import("@/components/PipelineGraph"), {
   ssr: false,
@@ -29,6 +36,9 @@ interface BlockViewProps {
     decision: "go" | "stop",
     notes?: string
   ) => void;
+  onAddAgent?: (blockId: string, agentId: string) => void;
+  onRemoveAgent?: (blockId: string, agentId: string) => void;
+  onUpdateEdges?: (blockId: string, edges: [string, string][]) => void;
 }
 
 export default function BlockView({
@@ -38,8 +48,117 @@ export default function BlockView({
   blockStatus,
   prevBlockName,
   onApproval,
+  onAddAgent,
+  onRemoveAgent,
+  onUpdateEdges,
 }: BlockViewProps) {
   const [notes, setNotes] = useState("");
+  const [showOrderEditor, setShowOrderEditor] = useState(false);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [agentOrder, setAgentOrder] = useState<string[]>(block.agents);
+  const [showAgentPicker, setShowAgentPicker] = useState(false);
+  const [agentSearch, setAgentSearch] = useState("");
+  const [availableAgents, setAvailableAgents] = useState<AvailableAgent[]>([]);
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  // Sync agent order when block changes
+  useEffect(() => {
+    setAgentOrder(block.agents);
+  }, [block.agents]);
+
+  // Check if current edges form a sequential chain
+  const isSequential = useMemo(() => {
+    if (block.agents.length <= 1) return true;
+    if (block.edges.length !== block.agents.length - 1) return false;
+    // Check if edges form a chain matching agent order
+    for (let i = 0; i < agentOrder.length - 1; i++) {
+      const hasEdge = block.edges.some(
+        ([s, t]) => s === agentOrder[i] && t === agentOrder[i + 1]
+      );
+      if (!hasEdge) return false;
+    }
+    return true;
+  }, [block.edges, block.agents, agentOrder]);
+
+  const isParallel = block.edges.length === 0 && block.agents.length > 1;
+
+  function makeSequentialEdges(order: string[]): [string, string][] {
+    const edges: [string, string][] = [];
+    for (let i = 0; i < order.length - 1; i++) {
+      edges.push([order[i], order[i + 1]]);
+    }
+    return edges;
+  }
+
+  function handleSetSequential() {
+    if (!onUpdateEdges) return;
+    onUpdateEdges(block.id, makeSequentialEdges(agentOrder));
+  }
+
+  function handleSetParallel() {
+    if (!onUpdateEdges) return;
+    onUpdateEdges(block.id, []);
+  }
+
+  function handleReorder(fromIdx: number, toIdx: number) {
+    const newOrder = [...agentOrder];
+    const [moved] = newOrder.splice(fromIdx, 1);
+    newOrder.splice(toIdx, 0, moved);
+    setAgentOrder(newOrder);
+    // If currently sequential, update edges to match new order
+    if (isSequential && onUpdateEdges) {
+      onUpdateEdges(block.id, makeSequentialEdges(newOrder));
+    }
+  }
+
+  // Fetch available agents list
+  useEffect(() => {
+    fetch("/api/agents")
+      .then((r) => r.json())
+      .then((data) => setAvailableAgents(data.agents || []))
+      .catch(() => {});
+  }, []);
+
+  // Close picker on outside click
+  useEffect(() => {
+    if (!showAgentPicker) return;
+    function handleClick(e: MouseEvent) {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setShowAgentPicker(false);
+        setAgentSearch("");
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showAgentPicker]);
+
+  // Filter agents: not already in block, match search
+  const filteredAgents = useMemo(() => {
+    const inBlock = new Set(block.agents);
+    const q = agentSearch.toLowerCase();
+    return availableAgents.filter(
+      (a) =>
+        !inBlock.has(a.id) &&
+        (a.name.toLowerCase().includes(q) ||
+          a.id.toLowerCase().includes(q) ||
+          a.role.toLowerCase().includes(q) ||
+          a.phase.toLowerCase().includes(q))
+    );
+  }, [availableAgents, block.agents, agentSearch]);
+
+  // Phase labels for grouping
+  const PHASE_LABELS: Record<string, string> = {
+    meta: "Мета",
+    research: "Исследование",
+    product: "Продукт",
+    legal: "Юридическое",
+    design: "Дизайн",
+    development: "Разработка",
+    quality: "Качество",
+    release: "Релиз",
+    marketing: "Маркетинг",
+    feedback: "Фидбек",
+  };
 
   // Build a PipelineGraph-compatible object from block agents and edges
   const blockGraph: PipelineGraphType = useMemo(() => {
@@ -96,11 +215,177 @@ export default function BlockView({
     <div className="flex flex-col gap-6">
       {/* Block header */}
       <div>
-        <h2 className="text-xl font-bold text-white">{block.name}</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold text-white">{block.name}</h2>
+          {onAddAgent && (
+            <div className="relative" ref={pickerRef}>
+              <button
+                onClick={() => {
+                  setShowAgentPicker(!showAgentPicker);
+                  setAgentSearch("");
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-700 bg-gray-800 text-gray-300 hover:bg-gray-700 transition-colors"
+              >
+                + Агент
+              </button>
+              {showAgentPicker && (
+                <div className="absolute right-0 top-full mt-1 w-80 rounded-lg border border-gray-700 bg-gray-900 shadow-xl z-50">
+                  <div className="p-2 border-b border-gray-800">
+                    <input
+                      type="text"
+                      value={agentSearch}
+                      onChange={(e) => setAgentSearch(e.target.value)}
+                      placeholder="Поиск агента..."
+                      autoFocus
+                      className="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+                    />
+                  </div>
+                  <div className="max-h-64 overflow-y-auto p-1">
+                    {filteredAgents.length === 0 ? (
+                      <p className="text-sm text-gray-500 px-3 py-2">
+                        {agentSearch ? "Ничего не найдено" : "Все агенты уже добавлены"}
+                      </p>
+                    ) : (
+                      (() => {
+                        let lastPhase = "";
+                        return filteredAgents.map((a) => {
+                          const showPhase = a.phase !== lastPhase;
+                          lastPhase = a.phase;
+                          return (
+                            <div key={a.id}>
+                              {showPhase && (
+                                <p className="text-[10px] uppercase tracking-wider text-gray-600 px-3 pt-2 pb-0.5">
+                                  {PHASE_LABELS[a.phase] || a.phase}
+                                </p>
+                              )}
+                              <button
+                                onClick={() => {
+                                  onAddAgent(block.id, a.id);
+                                  setShowAgentPicker(false);
+                                  setAgentSearch("");
+                                }}
+                                className="w-full text-left px-3 py-1.5 rounded-md hover:bg-gray-800 transition-colors group"
+                              >
+                                <span className="text-sm text-gray-200 group-hover:text-white">
+                                  {a.name}
+                                </span>
+                                {a.role && (
+                                  <span className="block text-xs text-gray-500 truncate">
+                                    {a.role}
+                                  </span>
+                                )}
+                              </button>
+                            </div>
+                          );
+                        });
+                      })()
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
         {block.description && (
           <p className="text-sm text-gray-400 mt-1">{block.description}</p>
         )}
+        {/* Agent chips with remove button */}
+        {onRemoveAgent && (
+          <div className="flex flex-wrap gap-1.5 mt-3">
+            {block.agents.map((agentId) => {
+              const agentInfo = availableAgents.find((a) => a.id === agentId);
+              const agentStatus = agents[agentId]?.status;
+              const isActive = agentStatus === "running" || agentStatus === "completed";
+              return (
+                <span
+                  key={agentId}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-gray-800 border border-gray-700 text-xs text-gray-300"
+                >
+                  {agentInfo?.name || agentId}
+                  {!isActive && (
+                    <button
+                      onClick={() => onRemoveAgent(block.id, agentId)}
+                      className="ml-0.5 text-gray-600 hover:text-red-400 transition-colors"
+                      title="Удалить агента"
+                    >
+                      x
+                    </button>
+                  )}
+                </span>
+              );
+            })}
+          </div>
+        )}
       </div>
+
+      {/* Execution mode: parallel vs sequential */}
+      {onUpdateEdges && block.agents.length > 1 && (
+        <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm font-medium text-gray-300">Порядок выполнения</span>
+            <div className="flex gap-1 rounded-lg bg-gray-800 p-0.5">
+              <button
+                onClick={handleSetParallel}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                  isParallel
+                    ? "bg-blue-600 text-white"
+                    : "text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                Параллельно
+              </button>
+              <button
+                onClick={handleSetSequential}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                  isSequential && !isParallel
+                    ? "bg-blue-600 text-white"
+                    : "text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                Последовательно
+              </button>
+            </div>
+          </div>
+          {(isSequential && !isParallel) && (
+            <div className="flex flex-col gap-1">
+              {agentOrder.map((agentId, idx) => {
+                const agentInfo = availableAgents.find((a) => a.id === agentId);
+                return (
+                  <div
+                    key={agentId}
+                    draggable
+                    onDragStart={() => setDragIdx(idx)}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.currentTarget.classList.add("border-blue-500");
+                    }}
+                    onDragLeave={(e) => {
+                      e.currentTarget.classList.remove("border-blue-500");
+                    }}
+                    onDrop={(e) => {
+                      e.currentTarget.classList.remove("border-blue-500");
+                      if (dragIdx !== null && dragIdx !== idx) {
+                        handleReorder(dragIdx, idx);
+                      }
+                      setDragIdx(null);
+                    }}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-md border border-gray-700 bg-gray-800 cursor-grab active:cursor-grabbing transition-colors ${
+                      dragIdx === idx ? "opacity-50" : ""
+                    }`}
+                  >
+                    <span className="text-gray-600 text-xs font-mono w-4">{idx + 1}</span>
+                    <span className="text-sm text-gray-200">{agentInfo?.name || agentId}</span>
+                    {idx < agentOrder.length - 1 && (
+                      <span className="ml-auto text-gray-600 text-xs">&darr;</span>
+                    )}
+                  </div>
+                );
+              })}
+              <p className="text-xs text-gray-600 mt-1">Перетащите для изменения порядка</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Status banners */}
       {blockStatus === "blocked" && (
