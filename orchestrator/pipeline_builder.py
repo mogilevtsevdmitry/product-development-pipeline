@@ -56,9 +56,13 @@ DEFAULT_FULL_GRAPH: Dict[str, Any] = {
         "product-marketer",
         "smm-manager",
         "content-creator",
+        # Публикация
+        "telegram-poster",
+        "instagram-poster",
         # Фидбек
         "customer-support",
         "data-analyst",
+        "production-monitor",
     ],
     "edges": [
         # Статическая цепочка (small docs, pass everything)
@@ -93,9 +97,17 @@ DEFAULT_FULL_GRAPH: Dict[str, Any] = {
         ["release-manager", "product-marketer"],
         ["product-marketer", "smm-manager"],
         ["product-marketer", "content-creator"],
+        # Маркетинг → Публикация
+        ["smm-manager", "telegram-poster", ["smm-plan.md"]],
+        ["smm-manager", "instagram-poster", ["smm-plan.md"]],
+        ["content-creator", "telegram-poster", ["content-creator-output.md"]],
+        ["content-creator", "instagram-poster", ["content-creator-output.md"]],
         # Release → Feedback (pass everything)
         ["release-manager", "customer-support"],
         ["release-manager", "data-analyst"],
+        # Release → Production Monitor
+        ["release-manager", "production-monitor", ["release_plan.md"]],
+        ["devops-engineer", "production-monitor", ["devops-engineer-output.md"]],
     ],
     "parallel_groups": [
         ["business-analyst", "system-architect", "ux-ui-designer", "legal-compliance"],
@@ -103,6 +115,7 @@ DEFAULT_FULL_GRAPH: Dict[str, Any] = {
         ["qa-engineer", "security-engineer"],
         ["product-marketer", "customer-support", "data-analyst"],
         ["smm-manager", "content-creator"],
+        ["telegram-poster", "instagram-poster"],
     ],
 }
 

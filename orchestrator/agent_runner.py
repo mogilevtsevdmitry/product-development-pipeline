@@ -7,6 +7,7 @@ projects/{project_id}/{phase}/{agent_id}/.
 """
 
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,23 @@ from config import (
     get_agent_dir,
     get_agent_phase,
 )
+
+
+def _load_env_vars() -> Dict[str, str]:
+    """Load environment variables from orchestrator/.env file."""
+    env_file = Path(__file__).parent / ".env"
+    extra_env: Dict[str, str] = {}
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            if value and key:
+                extra_env[key] = value
+    return extra_env
 
 
 def run_agent(
@@ -261,6 +279,7 @@ def _execute_agent(prompt: str, working_dir: Path) -> str:
         RuntimeError: Если выполнение завершилось с ошибкой.
     """
     try:
+        env = {**os.environ, **_load_env_vars()}
         result = subprocess.run(
             [
                 "claude",
@@ -272,6 +291,7 @@ def _execute_agent(prompt: str, working_dir: Path) -> str:
             capture_output=True,
             text=True,
             timeout=600,  # 10 минут на агента
+            env=env,
         )
 
         if result.returncode != 0:
