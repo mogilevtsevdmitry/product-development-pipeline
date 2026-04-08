@@ -17,23 +17,16 @@ stages:
   - build-and-push
   - deploy
 
-before_script:
-  - until docker info; do sleep 1; done
-  - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-
 build:
   stage: build-and-push
+  before_script:
+    - until docker info; do sleep 1; done
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
   script:
     - git clone https://oauth2:${CI_PROJECT_ACCESS_TOKEN}@${INFRA_REPO} infrastructure
     - cp infrastructure/docker/${SERVICE_NAME}/Dockerfile ./Dockerfile
     - docker build -t ${IMAGE_NAME} -f Dockerfile .
     - docker push ${IMAGE_NAME}
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-      when: always
-    - if: '$CI_PIPELINE_SOURCE == "web"'
-      when: always
-    - when: never
 
 deploy:
   image: alpine:latest
@@ -58,9 +51,3 @@ deploy:
       done
   needs:
     - build
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-      when: on_success
-    - if: '$CI_PIPELINE_SOURCE == "web"'
-      when: on_success
-    - when: never
