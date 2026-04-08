@@ -10,6 +10,14 @@ class Settings(BaseSettings):
     encryption_key: str = ""
     webhook_path: str = "/bot/webhook"
 
+    # ZenMoney OAuth 2.0
+    zenmoney_consumer_key: str = ""
+    zenmoney_consumer_secret: str = ""
+    zenmoney_redirect_uri: str = ""  # e.g. https://sova.app/api/oauth/zenmoney/callback
+
+    # T-Bank Invest
+    tbank_sandbox: bool = True  # use sandbox by default
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 
