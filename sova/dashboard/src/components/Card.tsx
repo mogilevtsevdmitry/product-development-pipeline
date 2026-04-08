@@ -6,16 +6,22 @@ interface CardProps {
   padding?: 'sm' | 'md' | 'lg';
 }
 
-const paddingMap = {
-  sm: 'p-4',
-  md: 'p-5',
-  lg: 'p-6',
+const paddingValues = {
+  sm: '16px',
+  md: '20px',
+  lg: '24px',
 };
 
 export function Card({ children, className = '', padding = 'md' }: CardProps) {
   return (
     <div
-      className={`bg-card border border-card-border rounded-xl ${paddingMap[padding]} ${className}`}
+      className={className}
+      style={{
+        backgroundColor: '#1C2333',
+        border: '1px solid #30363D',
+        borderRadius: '16px',
+        padding: paddingValues[padding],
+      }}
     >
       {children}
     </div>

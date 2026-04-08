@@ -9,10 +9,10 @@ import { overviewData } from '../lib/mockData';
 function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-card border border-card-border rounded-lg p-3 text-sm shadow-lg">
-      <p className="text-text-secondary mb-1">{label}</p>
+    <div style={{ backgroundColor: '#1C2333', border: '1px solid #30363D', borderRadius: '8px', padding: '12px' }}>
+      <p style={{ color: '#8B949E', marginBottom: '4px', fontSize: '12px' }}>{label}</p>
       {payload.map((p: any, i: number) => (
-        <p key={i} style={{ color: p.color }}>
+        <p key={i} style={{ color: p.color, fontSize: '13px' }}>
           {p.name}: {formatRub(p.value)} ₽
         </p>
       ))}
@@ -24,39 +24,36 @@ export function DashboardPage() {
   const d = overviewData;
 
   return (
-    <div className="space-y-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       {/* Balance Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px' }}>
         <Card>
-          <p className="text-text-secondary text-sm mb-1">Общий баланс</p>
-          <p className="text-3xl font-bold tabular-nums">
+          <p style={{ color: '#8B949E', fontSize: '13px', marginBottom: '4px' }}>Общий баланс</p>
+          <p style={{ fontSize: '32px', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
             ₽ {formatRub(d.totalBalance)}
           </p>
-          <div className="flex items-center gap-2 mt-2">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
             <Badge value={formatPercent(d.balanceChange)} variant="success" />
-            <span className="text-text-secondary text-xs">за 30 дней</span>
+            <span style={{ color: '#8B949E', fontSize: '12px' }}>за 30 дней</span>
           </div>
         </Card>
 
         <Card>
-          <p className="text-text-secondary text-sm mb-1">Стоимость портфеля</p>
-          <p className="text-3xl font-bold tabular-nums">
+          <p style={{ color: '#8B949E', fontSize: '13px', marginBottom: '4px' }}>Стоимость портфеля</p>
+          <p style={{ fontSize: '32px', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
             ₽ {formatRub(d.portfolioValue)}
           </p>
-          <div className="flex items-center gap-2 mt-2">
-            <Badge
-              value={formatPercent(d.portfolioChange)}
-              variant="error"
-            />
-            <span className="text-text-secondary text-xs">за день</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+            <Badge value={formatPercent(d.portfolioChange)} variant="error" />
+            <span style={{ color: '#8B949E', fontSize: '12px' }}>за день</span>
           </div>
         </Card>
       </div>
 
       {/* Income vs Expense Chart */}
       <Card>
-        <h3 className="text-lg font-semibold mb-4">Доходы vs Расходы (30 дней)</h3>
-        <div className="h-64">
+        <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>Доходы vs Расходы (30 дней)</h3>
+        <div style={{ height: '240px' }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={d.incomeExpenseChart} barGap={4}>
               <CartesianGrid strokeDasharray="3 3" stroke="#30363D" vertical={false} />
@@ -72,16 +69,16 @@ export function DashboardPage() {
 
       {/* Goals */}
       <div>
-        <h3 className="text-lg font-semibold mb-3">Мои цели</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '12px' }}>Мои цели</h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {d.goals.map((goal) => (
             <Card key={goal.id}>
-              <div className="flex justify-between items-start mb-3">
-                <p className="font-medium">{goal.name}</p>
-                <span className="text-text-secondary text-sm tabular-nums">{goal.percent}%</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+                <p style={{ fontWeight: 500, fontSize: '15px' }}>{goal.name}</p>
+                <span style={{ color: '#8B949E', fontSize: '14px', fontVariantNumeric: 'tabular-nums' }}>{goal.percent}%</span>
               </div>
               <ProgressBar percent={goal.percent} color={goal.color} />
-              <p className="text-text-secondary text-xs mt-2 tabular-nums">
+              <p style={{ color: '#8B949E', fontSize: '12px', marginTop: '8px', fontVariantNumeric: 'tabular-nums' }}>
                 ₽ {formatRub(goal.current)} / ₽ {formatRub(goal.target)}
               </p>
             </Card>
@@ -91,24 +88,35 @@ export function DashboardPage() {
 
       {/* Recent Transactions */}
       <Card>
-        <h3 className="text-lg font-semibold mb-4">Последние транзакции</h3>
-        <div className="space-y-3">
-          {d.recentTransactions.map((tx) => (
-            <div key={tx.id} className="flex items-center justify-between py-2 border-b border-card-border last:border-0">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-bg flex items-center justify-center">
+        <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>Последние транзакции</h3>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {d.recentTransactions.map((tx, i) => (
+            <div
+              key={tx.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '12px 0',
+                borderBottom: i < d.recentTransactions.length - 1 ? '1px solid #30363D' : 'none',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  width: '40px', height: '40px', borderRadius: '10px',
+                  backgroundColor: '#0D1117', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>
                   <CategoryIcon icon={tx.icon} size={18} className="text-text-secondary" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">{tx.description}</p>
-                  <p className="text-xs text-text-secondary">{tx.category}</p>
+                  <p style={{ fontSize: '14px', fontWeight: 500 }}>{tx.description}</p>
+                  <p style={{ fontSize: '12px', color: '#8B949E' }}>{tx.category}</p>
                 </div>
               </div>
-              <span
-                className={`text-sm font-semibold tabular-nums ${
-                  tx.amount < 0 ? 'text-error' : 'text-success'
-                }`}
-              >
+              <span style={{
+                fontSize: '14px', fontWeight: 600, fontVariantNumeric: 'tabular-nums',
+                color: tx.amount < 0 ? '#F85149' : '#3FB950'
+              }}>
                 {tx.amount < 0 ? '-' : '+'}₽ {formatRub(Math.abs(tx.amount))}
               </span>
             </div>
