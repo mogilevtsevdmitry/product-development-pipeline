@@ -4,6 +4,7 @@ from aiogram.types import Message, CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.services.user_service import UserService
+from src.services.billing_service import BillingService
 from src.bot.keyboards.common import (
     consent_keyboard,
     integration_keyboard,
@@ -125,6 +126,10 @@ async def on_level_select(callback: CallbackQuery, db: AsyncSession) -> None:
 
     await service.update_level(callback.from_user.id, level)
     await service.complete_onboarding(callback.from_user.id)
+
+    # Grant 5 free AI credits (50₽)
+    billing = BillingService(db)
+    await billing.grant_free_credits(callback.from_user.id)
 
     level_text = LEVEL_NAMES.get(level, level)
     await callback.message.edit_text(LEVEL_SELECTED_TEXT.format(level_text=level_text))

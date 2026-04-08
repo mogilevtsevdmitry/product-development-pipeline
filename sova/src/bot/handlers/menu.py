@@ -12,7 +12,6 @@ MENU_TEXT = "🦉 Главное меню — выбери раздел:"
 COMING_SOON_TEXT = {
     "menu:portfolio": "📈 *Портфель*\n\nРаздел будет доступен после подключения T-Bank.",
     "menu:goals": "🎯 *Цели*\n\nУправление целями будет доступно в следующем обновлении.",
-    "menu:ai_balance": "💎 *AI-баланс*\n\nУправление балансом будет доступно в следующем обновлении.",
 }
 
 
@@ -29,7 +28,7 @@ async def on_menu_callback(callback: CallbackQuery, db: AsyncSession) -> None:
     await callback.answer()
 
 
-@router.callback_query(F.data.in_({"menu:portfolio", "menu:goals", "menu:ai_balance"}))
+@router.callback_query(F.data.in_({"menu:portfolio", "menu:goals"}))
 async def on_coming_soon(callback: CallbackQuery, db: AsyncSession) -> None:
     """Stub handler for not-yet-implemented menu sections."""
     text = COMING_SOON_TEXT.get(callback.data, "🔧 Раздел в разработке")

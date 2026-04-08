@@ -49,10 +49,9 @@ async def test_coming_soon_goals(db, make_callback):
     assert "Цели" in call_text
 
 
-async def test_coming_soon_ai_balance(db, make_callback):
-    """AI balance stub should show coming soon message."""
-    cb = make_callback(data="menu:ai_balance")
-    await on_coming_soon(cb, db=db)
-
-    call_text = cb.message.edit_text.call_args[0][0]
-    assert "AI-баланс" in call_text
+async def test_ai_balance_not_in_coming_soon(db, make_callback):
+    """AI balance is no longer a stub — handled by billing router."""
+    # menu:ai_balance was removed from the coming_soon set
+    # It is now handled by src.bot.handlers.billing.on_ai_balance_callback
+    from src.bot.handlers.menu import COMING_SOON_TEXT
+    assert "menu:ai_balance" not in COMING_SOON_TEXT
