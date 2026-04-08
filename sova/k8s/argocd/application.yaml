@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: sova
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: sova
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/example/sova.git
+    targetRevision: main
+    path: sova/k8s/overlays/production
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: sova
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

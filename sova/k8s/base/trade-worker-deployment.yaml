@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trade-worker
+  namespace: sova
+  labels:
+    app.kubernetes.io/name: trade-worker
+    app.kubernetes.io/part-of: sova
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: trade-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: trade-worker
+        app.kubernetes.io/part-of: sova
+        app.kubernetes.io/component: worker
+    spec:
+      containers:
+        - name: trade-worker
+          image: sova-app:latest
+          command: ["python", "-m", "src.workers.trade_worker"]
+          envFrom:
+            - configMapRef:
+                name: sova-config
+            - secretRef:
+                name: sova-secrets
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"

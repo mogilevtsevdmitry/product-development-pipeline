@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sova-config
+  namespace: sova
+  labels:
+    app.kubernetes.io/part-of: sova
+data:
+  APP_BASE_URL: "https://sova.example.com"
+  REDIS_URL: "redis://redis:6379/0"
+  DATABASE_URL: "postgresql+asyncpg://sova:$(POSTGRES_PASSWORD)@postgres:5432/sova"
+  WEBHOOK_PATH: "/webhook"

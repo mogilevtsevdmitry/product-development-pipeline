@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: sova
+
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: kustomize
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secrets.yaml
+  - postgres-pvc.yaml
+  - postgres-statefulset.yaml
+  - postgres-service.yaml
+  - redis-deployment.yaml
+  - redis-service.yaml
+  - app-deployment.yaml
+  - app-service.yaml
+  - ai-worker-deployment.yaml
+  - cron-worker-deployment.yaml
+  - trade-worker-deployment.yaml
+  - migrate-job.yaml
