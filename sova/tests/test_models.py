@@ -120,3 +120,26 @@ async def test_create_trade_order(db):
     saved = result.scalar_one()
     assert saved.status == "pending_confirmation"
     assert saved.direction == "buy"
+
+
+async def test_user_referral_and_consent_fields(db):
+    from datetime import datetime, timezone
+
+    user = User(
+        telegram_id=888,
+        username="refuser",
+        first_name="Ref",
+        referral_code="ABC123",
+        referred_by=None,
+        pd_consent_at=datetime.now(timezone.utc),
+        onboarding_completed=True,
+    )
+    db.add(user)
+    await db.commit()
+
+    result = await db.execute(select(User).where(User.telegram_id == 888))
+    saved = result.scalar_one()
+    assert saved.referral_code == "ABC123"
+    assert saved.referred_by is None
+    assert saved.pd_consent_at is not None
+    assert saved.onboarding_completed is True

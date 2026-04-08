@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import BigInteger, String, Numeric, Integer, DateTime, JSON
+from sqlalchemy import BigInteger, String, Numeric, Integer, DateTime, JSON, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 from src.models.base import Base
 
@@ -14,6 +14,11 @@ class User(Base):
     ai_balance_version: Mapped[int] = mapped_column(Integer, default=0)
     timezone: Mapped[str] = mapped_column(String, default="Europe/Moscow")
     notification_settings: Mapped[dict] = mapped_column(JSON, default=dict)
+    referral_code: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
+    referred_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    referral_count: Mapped[int] = mapped_column(Integer, default=0)
+    pd_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
