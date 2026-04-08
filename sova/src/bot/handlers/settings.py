@@ -10,12 +10,6 @@ router = Router(name="settings")
 
 SETTINGS_TEXT = "🔔 *Настройки:*\nВыбери, что хочешь изменить:"
 
-INTEGRATIONS_STUB_TEXT = (
-    "🏦 *Интеграции:*\n\n"
-    "Подключение ZenMoney и T-Bank будет доступно в следующем обновлении.\n\n"
-    "Следи за обновлениями!"
-)
-
 
 @router.message(Command("settings"))
 async def cmd_settings(message: Message, db: AsyncSession) -> None:
@@ -50,16 +44,6 @@ async def on_toggle_notifications(callback: CallbackQuery, db: AsyncSession) -> 
     await callback.message.edit_text(
         f"🔔 Уведомления {status}",
         reply_markup=settings_keyboard(new_state),
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data == "settings:integrations")
-async def on_integrations(callback: CallbackQuery, db: AsyncSession) -> None:
-    """Show integrations stub."""
-    await callback.message.edit_text(
-        INTEGRATIONS_STUB_TEXT,
-        reply_markup=settings_keyboard(),
     )
     await callback.answer()
 

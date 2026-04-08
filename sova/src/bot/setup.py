@@ -52,6 +52,7 @@ def register_handlers() -> None:
     from src.bot.handlers.expense import router as expense_router
     from src.bot.handlers.invite import router as invite_router
     from src.bot.handlers.settings import router as settings_router
+    from src.bot.handlers.integrations import router as integrations_router
 
     main_router.include_router(start_router)
     main_router.include_router(menu_router)
@@ -60,6 +61,7 @@ def register_handlers() -> None:
     main_router.include_router(help_router)
     main_router.include_router(invite_router)
     main_router.include_router(settings_router)
+    main_router.include_router(integrations_router)
     # Expense router is last — it catches plain text messages
     main_router.include_router(expense_router)
 

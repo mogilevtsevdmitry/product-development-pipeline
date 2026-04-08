@@ -52,6 +52,38 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def integrations_keyboard(
+    zm_status: str | None = None,
+    tb_status: str | None = None,
+) -> InlineKeyboardMarkup:
+    """Integration management keyboard.
+
+    Args:
+        zm_status: ZenMoney integration status (None=not connected, active, error, disconnected)
+        tb_status: T-Bank integration status
+    """
+    buttons = []
+
+    # ZenMoney
+    if zm_status == "active":
+        buttons.append([InlineKeyboardButton(text="✅ ZenMoney подключён", callback_data="integration:zm_status")])
+    elif zm_status == "error":
+        buttons.append([InlineKeyboardButton(text="⚠️ ZenMoney (ошибка)", callback_data="integration:zm_reconnect")])
+    else:
+        buttons.append([InlineKeyboardButton(text="🏦 Подключить ZenMoney", callback_data="integration:zm_connect")])
+
+    # T-Bank
+    if tb_status == "active":
+        buttons.append([InlineKeyboardButton(text="✅ T-Bank Invest подключён", callback_data="integration:tb_status")])
+    elif tb_status == "error":
+        buttons.append([InlineKeyboardButton(text="⚠️ T-Bank Invest (ошибка)", callback_data="integration:tb_reconnect")])
+    else:
+        buttons.append([InlineKeyboardButton(text="💳 Подключить T-Bank Invest", callback_data="integration:tb_connect")])
+
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="menu:settings")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def settings_keyboard(notifications_enabled: bool = True) -> InlineKeyboardMarkup:
     """Settings menu keyboard."""
     notif_text = "🔕 Выключить уведомления" if notifications_enabled else "🔔 Включить уведомления"
