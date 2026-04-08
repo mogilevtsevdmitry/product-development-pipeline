@@ -40,7 +40,7 @@ def _parse_redis_url(url: str) -> RedisSettings:
 
 def _create_provider() -> FallbackProvider:
     """Create LLM provider with fallback."""
-    claude = ClaudeProvider(api_key=settings.anthropic_api_key)
+    claude = ClaudeProvider(api_key=settings.anthropic_api_key, base_url=settings.anthropic_base_url)
     return FallbackProvider([claude])
 
 

@@ -49,7 +49,7 @@ def _create_provider() -> FallbackProvider | None:
     """Create LLM provider, returning None if not configured."""
     if not settings.anthropic_api_key:
         return None
-    claude = ClaudeProvider(api_key=settings.anthropic_api_key)
+    claude = ClaudeProvider(api_key=settings.anthropic_api_key, base_url=settings.anthropic_base_url)
     return FallbackProvider([claude])
 
 

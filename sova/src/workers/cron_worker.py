@@ -125,7 +125,7 @@ async def generate_daily_digests() -> None:
             logger.warning("No ANTHROPIC_API_KEY — skipping digest generation")
             return
 
-        provider = FallbackProvider([ClaudeProvider(api_key=settings.anthropic_api_key)])
+        provider = FallbackProvider([ClaudeProvider(api_key=settings.anthropic_api_key, base_url=settings.anthropic_base_url)])
         generated = 0
         failed = 0
 

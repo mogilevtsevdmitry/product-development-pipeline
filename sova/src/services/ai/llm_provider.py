@@ -7,7 +7,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
+DEFAULT_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 
 # Model identifiers
@@ -52,20 +52,37 @@ class LLMProvider(ABC):
 
 
 class ClaudeProvider(LLMProvider):
-    """Claude API provider using httpx."""
+    """Claude API provider using httpx.
 
-    def __init__(self, api_key: str, timeout: float = 30.0):
+    Supports custom base_url for OpenRouter or other compatible APIs.
+    """
+
+    def __init__(
+        self, api_key: str, base_url: str = "", timeout: float = 30.0
+    ):
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY is required")
         self._api_key = api_key
+        self._base_url = base_url.rstrip("/") if base_url else ""
         self._timeout = timeout
 
+    @property
+    def _api_url(self) -> str:
+        """Resolve API endpoint: custom base_url or default Anthropic."""
+        if self._base_url:
+            return f"{self._base_url}/messages"
+        return DEFAULT_API_URL
+
     def _headers(self) -> dict[str, str]:
-        return {
+        headers = {
             "x-api-key": self._api_key,
             "anthropic-version": ANTHROPIC_VERSION,
             "content-type": "application/json",
         }
+        # OpenRouter uses Authorization header instead of x-api-key
+        if self._base_url and "openrouter" in self._base_url:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        return headers
 
     async def _call(
         self, model: str, system: str, user: str, max_tokens: int = 2048
@@ -81,22 +98,22 @@ class ClaudeProvider(LLMProvider):
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             try:
                 resp = await client.post(
-                    CLAUDE_API_URL, headers=self._headers(), json=payload
+                    self._api_url, headers=self._headers(), json=payload
                 )
                 resp.raise_for_status()
             except httpx.HTTPStatusError as e:
-                logger.error("Claude API HTTP error: %s %s", e.response.status_code, e.response.text)
-                raise LLMError(f"Claude API error: {e.response.status_code}") from e
+                logger.error("LLM API HTTP error: %s %s", e.response.status_code, e.response.text)
+                raise LLMError(f"LLM API error: {e.response.status_code}") from e
             except httpx.RequestError as e:
-                logger.error("Claude API request error: %s", str(e))
-                raise LLMError(f"Claude API request error: {e}") from e
+                logger.error("LLM API request error: %s", str(e))
+                raise LLMError(f"LLM API request error: {e}") from e
 
         data = resp.json()
         # Extract text from content blocks
         content_blocks = data.get("content", [])
         texts = [b["text"] for b in content_blocks if b.get("type") == "text"]
         if not texts:
-            raise LLMError("No text content in Claude response")
+            raise LLMError("No text content in LLM response")
         return "\n".join(texts)
 
     async def complete(self, system: str, user: str) -> str:
