@@ -124,12 +124,23 @@ async def test_refresh_tokens_refreshes_active_integrations():
 
 
 async def test_cleanup_news_cache_runs_without_error():
-    """cleanup_news_cache stub should run without errors."""
-    await cleanup_news_cache()
+    """cleanup_news_cache should run without errors."""
+    mock_db = AsyncMock()
+
+    with patch("src.workers.cron_worker.async_session") as mock_session_factory:
+        mock_session_factory.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_session_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("src.services.news.aggregator.NewsAggregator") as MockAgg:
+            mock_agg = AsyncMock()
+            mock_agg.cleanup_expired.return_value = 0
+            MockAgg.return_value = mock_agg
+
+            await cleanup_news_cache()
 
 
 def test_create_scheduler_has_all_jobs():
-    """Scheduler should have all 5 jobs configured."""
+    """Scheduler should have all expected jobs configured."""
     scheduler = create_scheduler()
     jobs = scheduler.get_jobs()
     job_ids = {j.id for j in jobs}
@@ -139,4 +150,8 @@ def test_create_scheduler_has_all_jobs():
     assert "refresh_tokens" in job_ids
     assert "generate_daily_digests" in job_ids
     assert "cleanup_news_cache" in job_ids
-    assert len(jobs) == 5
+    assert "parse_news" in job_ids
+    assert "check_large_expenses" in job_ids
+    assert "check_portfolio_drops" in job_ids
+    assert "fetch_exchange_rates" in job_ids
+    assert len(jobs) == 9

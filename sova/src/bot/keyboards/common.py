@@ -48,7 +48,10 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🔔 Настройки", callback_data="menu:settings"),
             InlineKeyboardButton(text="💎 Баланс AI", callback_data="menu:ai_balance"),
         ],
-        [InlineKeyboardButton(text="📖 Помощь", callback_data="menu:help")],
+        [
+            InlineKeyboardButton(text="📰 Новости", callback_data="menu:news"),
+            InlineKeyboardButton(text="📖 Помощь", callback_data="menu:help"),
+        ],
     ])
 
 
