@@ -72,6 +72,11 @@ migrate:
       fi
     - cd sova
     - pip install --no-cache-dir .
+    - |
+      if ! alembic current 2>/dev/null | grep -q "head"; then
+        echo "Stamping current DB state..."
+        alembic stamp head
+      fi
     - alembic upgrade head
     - echo "✅ Migrations completed"
   needs:
