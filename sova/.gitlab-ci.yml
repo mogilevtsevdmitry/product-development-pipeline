@@ -1,0 +1,46 @@
+include:
+  - project: 'devops/infrastructure'
+    ref: main
+    file: '/pipelines/base.yaml'
+
+variables:
+  SERVICE_NAME: "financial-agent"
+  DOCKERFILE_PATH: "financial-agent"
+  VAULT_SECRET_PATH: "kv/env/financial-agent"
+
+fetch-secrets:
+  extends: .fetch-vault-secrets
+  variables:
+    VAULT_ADDR_VAR: "http://vault.vault.svc.cluster.local:8200"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: always
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: always
+
+build:
+  extends: .build-template
+  variables:
+    SERVICE_NAME: "financial-agent"
+    DOCKERFILE_PATH: "financial-agent"
+  needs:
+    - fetch-secrets
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: on_success
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: on_success
+
+deploy:
+  extends: .deploy-template
+  variables:
+    SERVICE_NAME: "financial-agent"
+    K8S_PATH: "financial-agent"
+    TAG_PATH: "image.tag"
+  needs:
+    - build
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: on_success
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: on_success
