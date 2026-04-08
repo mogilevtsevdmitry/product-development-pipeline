@@ -1,0 +1,103 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: sova
+      POSTGRES_USER: sova
+      POSTGRES_PASSWORD: sova
+    ports:
+      - "20958:5432"
+    volumes:
+      - pgdata_local:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sova"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "30353:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build: .
+    ports:
+      - "51543:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://sova:sova@postgres:5432/sova
+      REDIS_URL: redis://redis:6379/0
+      BOT_TOKEN: ""
+      ANTHROPIC_API_KEY: ""
+      APP_BASE_URL: http://localhost:51543
+      ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+
+  migrate:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg2://sova:sova@postgres:5432/sova
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: alembic upgrade head
+    profiles:
+      - migrate
+
+  ai-worker:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+asyncpg://sova:sova@postgres:5432/sova
+      REDIS_URL: redis://redis:6379/0
+      BOT_TOKEN: ""
+      ANTHROPIC_API_KEY: ""
+      ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: python -m src.workers.ai_worker
+
+  cron-worker:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+asyncpg://sova:sova@postgres:5432/sova
+      REDIS_URL: redis://redis:6379/0
+      BOT_TOKEN: ""
+      ANTHROPIC_API_KEY: ""
+      ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: python -m src.workers.cron_worker
+
+  trade-worker:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+asyncpg://sova:sova@postgres:5432/sova
+      REDIS_URL: redis://redis:6379/0
+      BOT_TOKEN: ""
+      ANTHROPIC_API_KEY: ""
+      ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: python -m src.workers.trade_worker
+
+volumes:
+  pgdata_local:

@@ -199,7 +199,7 @@ async def enqueue_ai_task(
     return None
 
 
-async def main():
+def main():
     """Main entry point — run the arq worker."""
     logging.basicConfig(
         level=logging.INFO,
@@ -210,4 +210,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
