@@ -29,9 +29,7 @@ fetch-secrets:
     - export VAULT_ADDR="https://vault.xn--d1acaxq.xn--p1ai"
     - export VAULT_TOKEN=$VAULT_TOKEN
     - vault status
-    - vault kv get -format=json kv/env/financial-agent
-      | jq -r '.data.data | to_entries[] | "export \(.key|gsub("[^A-Za-z0-9_]"; "_"))=\(.value|tostring|@sh)"'
-      > build.env
+    - vault kv get -format=json kv/env/financial-agent | jq -r '.data.data | to_entries[] | "export \(.key|gsub("[^A-Za-z0-9_]"; "_"))=\(.value|tostring|@sh)"' > build.env
   artifacts:
     paths:
       - build.env
@@ -100,19 +98,7 @@ deploy:
     - yq eval ".image.tag = \"${CI_COMMIT_SHORT_SHA}\"" -i values.yaml
     - git add .
     - git commit -m "deploy: update ${SERVICE_NAME} image to ${CI_COMMIT_SHORT_SHA}" || true
-    - |
-      for i in 1 2 3 4 5; do
-        echo "Attempt $i..."
-        if git pull --rebase origin main && git push origin main; then
-          echo "✅ Pushed on attempt $i"
-          break
-        fi
-        if [ $i -eq 5 ]; then
-          echo "❌ Failed after 5 attempts"
-          exit 1
-        fi
-        sleep $((i * 2 + RANDOM % 10))
-      done
+    - for i in 1 2 3 4 5; do echo "Attempt $i..."; if git pull --rebase origin main && git push origin main; then echo "Pushed on attempt $i"; break; fi; if [ $i -eq 5 ]; then echo "Failed after 5 attempts"; exit 1; fi; sleep $((i * 2)); done
   needs:
     - build
     - migrate
