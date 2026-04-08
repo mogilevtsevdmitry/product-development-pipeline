@@ -100,6 +100,63 @@ async def refresh_tokens() -> None:
         logger.info("Token refresh done: %d ok, %d failed", refreshed, failed)
 
 
+async def generate_daily_digests() -> None:
+    """Generate daily digests for users who have them enabled."""
+    logger.info("Starting daily digest generation")
+    async with async_session() as db:
+        from sqlalchemy import select
+        from src.models.user import User
+        from src.services.ai.llm_provider import ClaudeProvider, FallbackProvider
+        from src.services.ai.service import AIService
+
+        # Find users with daily digest enabled
+        result = await db.execute(
+            select(User).where(
+                User.onboarding_completed.is_(True),
+            )
+        )
+        users = list(result.scalars().all())
+
+        if not settings.anthropic_api_key:
+            logger.warning("No ANTHROPIC_API_KEY — skipping digest generation")
+            return
+
+        provider = FallbackProvider([ClaudeProvider(api_key=settings.anthropic_api_key)])
+        generated = 0
+        failed = 0
+
+        for user in users:
+            # Check if user has digest notifications enabled
+            notif = user.notification_settings or {}
+            if not notif.get("daily_digest", False):
+                continue
+
+            try:
+                service = AIService(db, provider)
+                # Check if user has enough balance
+                from src.services.billing_service import BillingService
+                billing = BillingService(db)
+                has_balance = await billing.has_sufficient_balance(
+                    user.telegram_id, service.get_cost("generate_digest"),
+                )
+                if not has_balance:
+                    logger.info("User %d: insufficient balance for digest", user.telegram_id)
+                    continue
+
+                await service.generate_digest(user.telegram_id, "daily")
+                generated += 1
+                logger.info("Generated digest for user %d", user.telegram_id)
+
+            except Exception as e:
+                failed += 1
+                logger.error(
+                    "Digest generation failed for user %d: %s",
+                    user.telegram_id, str(e),
+                )
+
+        logger.info("Digest generation done: %d generated, %d failed", generated, failed)
+
+
 async def cleanup_news_cache() -> None:
     """Delete expired news cache entries (stub for Plan 7)."""
     logger.info("News cache cleanup: stub — nothing to do yet")
@@ -133,6 +190,15 @@ def create_scheduler() -> AsyncIOScheduler:
         trigger=IntervalTrigger(minutes=30),
         id="refresh_tokens",
         name="Refresh expiring ZenMoney tokens",
+        replace_existing=True,
+    )
+
+    # Daily digest: every day at 8:00 AM MSK
+    scheduler.add_job(
+        generate_daily_digests,
+        trigger=CronTrigger(hour=8, minute=0, timezone="Europe/Moscow"),
+        id="generate_daily_digests",
+        name="Generate daily digests",
         replace_existing=True,
     )
 

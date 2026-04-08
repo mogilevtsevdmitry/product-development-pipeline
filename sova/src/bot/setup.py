@@ -54,6 +54,7 @@ def register_handlers() -> None:
     from src.bot.handlers.settings import router as settings_router
     from src.bot.handlers.integrations import router as integrations_router
     from src.bot.handlers.billing import router as billing_router
+    from src.bot.handlers.ai import router as ai_router
 
     main_router.include_router(start_router)
     main_router.include_router(menu_router)
@@ -64,6 +65,8 @@ def register_handlers() -> None:
     main_router.include_router(settings_router)
     main_router.include_router(integrations_router)
     main_router.include_router(billing_router)
+    # AI router catches AI-intent text messages before expense router
+    main_router.include_router(ai_router)
     # Expense router is last — it catches plain text messages
     main_router.include_router(expense_router)
 

@@ -129,7 +129,7 @@ async def test_cleanup_news_cache_runs_without_error():
 
 
 def test_create_scheduler_has_all_jobs():
-    """Scheduler should have all 4 jobs configured."""
+    """Scheduler should have all 5 jobs configured."""
     scheduler = create_scheduler()
     jobs = scheduler.get_jobs()
     job_ids = {j.id for j in jobs}
@@ -137,5 +137,6 @@ def test_create_scheduler_has_all_jobs():
     assert "sync_zenmoney" in job_ids
     assert "sync_tbank" in job_ids
     assert "refresh_tokens" in job_ids
+    assert "generate_daily_digests" in job_ids
     assert "cleanup_news_cache" in job_ids
-    assert len(jobs) == 4
+    assert len(jobs) == 5
