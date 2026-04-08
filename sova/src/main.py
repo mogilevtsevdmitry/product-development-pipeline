@@ -1,9 +1,14 @@
+import pathlib
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.api.router import api_router
 from src.config import settings
+
+DASHBOARD_DIR = pathlib.Path(__file__).resolve().parent.parent / "dashboard" / "dist"
 
 
 @asynccontextmanager
@@ -31,3 +36,15 @@ from src.bot.setup import register_handlers, setup_webhook_route  # noqa: E402
 
 register_handlers()
 setup_webhook_route(app)
+
+# Serve dashboard SPA — must be after all API routes
+if DASHBOARD_DIR.is_dir():
+    app.mount("/assets", StaticFiles(directory=str(DASHBOARD_DIR / "assets")), name="dashboard-assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(request: Request, full_path: str):
+        """Serve dashboard SPA — any non-API path returns index.html."""
+        file_path = DASHBOARD_DIR / full_path
+        if file_path.is_file():
+            return FileResponse(str(file_path))
+        return FileResponse(str(DASHBOARD_DIR / "index.html"))
