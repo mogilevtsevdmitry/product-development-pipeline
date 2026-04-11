@@ -14,34 +14,10 @@ services:
   - docker:24-dind
 
 stages:
-  - fetch-secrets
   - build-and-push
-  - migrate
   - deploy
 
-# ---- Stage 1: Fetch secrets from Vault ----
-fetch-secrets:
-  image: hashicorp/vault:1.15.2
-  stage: fetch-secrets
-  before_script:
-    - apk add --no-cache jq
-  script:
-    - export VAULT_ADDR="https://vault.xn--d1acaxq.xn--p1ai"
-    - export VAULT_TOKEN=$VAULT_TOKEN
-    - vault status
-    - vault kv get -format=json kv/env/financial-agent | jq -r '.data.data | to_entries[] | "export \(.key|gsub("[^A-Za-z0-9_]"; "_"))=\(.value|tostring|@sh)"' > build.env
-  artifacts:
-    paths:
-      - build.env
-    expire_in: 1 hour
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-      when: always
-    - if: '$CI_PIPELINE_SOURCE == "web"'
-      when: always
-    - when: never
-
-# ---- Stage 2: Build Docker image (app + dashboard + workers) ----
+# ---- Stage 1: Build Docker image (app + dashboard + workers) ----
 build:
   stage: build-and-push
   before_script:
@@ -58,38 +34,8 @@ build:
       when: always
     - when: never
 
-# ---- Stage 3: Run Alembic migrations ----
-migrate:
-  image: python:3.12-slim
-  stage: migrate
-  before_script:
-    - set -a && [ -f build.env ] && . build.env && set +a || true
-  script:
-    - |
-      if [ -z "$DATABASE_URL" ]; then
-        echo "❌ DATABASE_URL is not set"
-        exit 1
-      fi
-    - cd sova
-    - pip install --no-cache-dir .
-    - |
-      if ! alembic current 2>/dev/null | grep -q "head"; then
-        echo "Stamping current DB state..."
-        alembic stamp head
-      fi
-    - alembic upgrade head
-    - echo "✅ Migrations completed"
-  needs:
-    - fetch-secrets
-    - build
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-      when: on_success
-    - if: '$CI_PIPELINE_SOURCE == "web"'
-      when: on_success
-    - when: never
-
-# ---- Stage 4: Update image tag in k8s and push to infra repo ----
+# ---- Stage 2: Update image tag in k8s and push to infra repo ----
+# Migrations run as ArgoCD pre-sync hook Job (see k8s/prod/financial-agent/templates/migration-job.yaml)
 deploy:
   image: alpine:latest
   stage: deploy
@@ -113,7 +59,6 @@ deploy:
       done
   needs:
     - build
-    - migrate
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
       when: on_success
