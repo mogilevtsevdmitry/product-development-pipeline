@@ -5,8 +5,9 @@
 FROM node:20-alpine AS dashboard-builder
 
 WORKDIR /dashboard
-COPY dashboard/package.json ./
-RUN npm install --ignore-scripts
+COPY dashboard/package.json dashboard/package-lock.json* ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --ignore-scripts || npm install --ignore-scripts
 COPY dashboard/ .
 RUN npm run build
 
@@ -16,7 +17,8 @@ FROM python:3.12-slim AS builder
 WORKDIR /app
 
 COPY pyproject.toml .
-RUN pip install --no-cache-dir --prefix=/install .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --prefix=/install .
 
 # ---- Stage 3: Production runner ----
 FROM python:3.12-slim AS runner
