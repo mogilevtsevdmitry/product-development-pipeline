@@ -44,6 +44,11 @@ class Settings(BaseSettings):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         elif url.startswith("postgresql+psycopg2://"):
             url = url.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
+        # asyncpg doesn't support sslmode param — strip it from URL
+        if "?" in url:
+            base, params = url.split("?", 1)
+            filtered = "&".join(p for p in params.split("&") if not p.startswith("sslmode="))
+            url = f"{base}?{filtered}" if filtered else base
         return url
 
     @property
