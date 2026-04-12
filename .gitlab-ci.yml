@@ -55,7 +55,7 @@ deploy:
     - git config --global user.email "ci@sova.app"
     - git config --global user.name "GitLab CI"
   script:
-    - git clone https://oauth2:${CI_PROJECT_ACCESS_TOKEN}@${INFRA_REPO} infrastructure
+    - git clone https://gitlab-ci-token:${CI_JOB_TOKEN}@${INFRA_REPO} infrastructure
     - cd infrastructure/k8s/prod/${SERVICE_NAME}
     - yq eval ".image.tag = \"${CI_COMMIT_SHORT_SHA}\"" -i values.yaml
     - git add .
