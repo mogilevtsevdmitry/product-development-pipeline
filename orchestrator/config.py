@@ -4,8 +4,44 @@
 Константы, пути, реестр агентов, определения фаз и gate-точек.
 """
 
+import json
 from pathlib import Path
 from typing import Dict, List, Any
+
+SKIP_AGENT_DIRS = {"shared", "node_modules", ".git", "__pycache__"}
+
+
+def _discover_agents(agents_dir: Path) -> Dict[str, str]:
+    """Автодискавери агентов из ФС.
+
+    Источник правды — agents/agents-config.json (используется дашбордом).
+    Если его нет или агент в нём не описан — сканируем agents/{phase}/{name}/.
+    """
+    registry: Dict[str, str] = {}
+
+    config_path = agents_dir / "agents-config.json"
+    if config_path.exists():
+        try:
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+            for agent_id, cfg in data.items():
+                path = cfg.get("path")
+                if path:
+                    registry[agent_id] = path
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    if agents_dir.exists():
+        for phase_dir in agents_dir.iterdir():
+            if not phase_dir.is_dir() or phase_dir.name in SKIP_AGENT_DIRS:
+                continue
+            for agent_dir in phase_dir.iterdir():
+                if not agent_dir.is_dir():
+                    continue
+                agent_id = agent_dir.name
+                if agent_id not in registry:
+                    registry[agent_id] = f"agents/{phase_dir.name}/{agent_id}"
+
+    return registry
 
 # =============================================================================
 # Пути
@@ -24,7 +60,12 @@ SCHEMA_VERSION: int = 2
 # Реестр агентов
 # =============================================================================
 
-AGENT_REGISTRY: Dict[str, str] = {
+AGENT_REGISTRY: Dict[str, str] = _discover_agents(AGENTS_DIR)
+
+# Жёстко зашитый реестр оставлен ниже как fallback / справочник на случай,
+# если папка agents/ ещё не создана (например, в тестах). При наличии
+# реальных агентов на диске значения из _discover_agents имеют приоритет.
+_FALLBACK_REGISTRY: Dict[str, str] = {
     # Мета-агенты
     "pipeline-architect": "agents/meta/pipeline-architect",
     "orchestrator":       "agents/meta/orchestrator",
@@ -83,6 +124,9 @@ AGENT_REGISTRY: Dict[str, str] = {
     "youtube-poster":       "agents/content/youtube-poster",
     "analytics-collector":  "agents/content/analytics-collector",
 }
+
+for _aid, _apath in _FALLBACK_REGISTRY.items():
+    AGENT_REGISTRY.setdefault(_aid, _apath)
 
 # =============================================================================
 # Определения фаз

@@ -82,21 +82,21 @@ The dashboard will be available at http://localhost:3344
 
 ### Creating Agents
 
-Agents live in the `agents/` folder. Each agent is a directory containing:
+Agents are picked up automatically — no config files to edit by hand.
+
+**Option 1 — via dashboard (recommended):** on the "Agents" page click "Create agent" and fill in the name / phase / role. The dashboard scaffolds the folder structure, `system-prompt.md` and `rules.md` templates, and registers the agent in `agents/agents-config.json`.
+
+**Option 2 — manually:** just create a folder with the right layout:
 
 ```
-agents/{category}/{agent-name}/
+agents/{phase}/{agent-name}/
 ├── system-prompt.md   # Agent's role and tasks
 ├── rules.md           # Rules and constraints
 └── skills/            # Skills (optional)
     └── skill-name.md
 ```
 
-After creating the files, register the agent in `orchestrator/config.py`:
-
-```python
-AGENT_REGISTRY["my-agent"] = "agents/{category}/{agent-name}"
-```
+On the next run both the dashboard and the orchestrator will discover the new agent by scanning `agents/`.
 
 Details: [agents/README.md](agents/README.md)
 
