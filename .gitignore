@@ -1,13 +1,41 @@
+# === Runtime / user data ===
 /projects/
+/sova/
+orchestrator/state/*.json
+
+# === Secrets ===
+.env
+.env.*
+!.env.example
+
+# === Node.js ===
 node_modules/
 .next/
-__pycache__/
-*.pyc
-.env
-.env.local
-orchestrator/state/*.json
 dashboard/.next/
-.DS_Store
-*.log
 dashboard/next-env.d.ts
 dashboard/tsconfig.tsbuildinfo
+
+# === Python ===
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === IDE ===
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# === Logs ===
+*.log
+
+# === Claude Code local config ===
+.claude/
