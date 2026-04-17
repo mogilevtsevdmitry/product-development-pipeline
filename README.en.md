@@ -1,3 +1,5 @@
+![Product Development Pipeline](banner.jpg)
+
 # Product Development Pipeline
 
 [🇷🇺 Русская версия](README.md)
