@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import type {
   PipelineBlock,
   AgentState,
@@ -53,6 +54,7 @@ export default function BlockView({
   onUpdateEdges,
 }: BlockViewProps) {
   const [notes, setNotes] = useState("");
+  const [removeTarget, setRemoveTarget] = useState<string | null>(null);
   const [showOrderEditor, setShowOrderEditor] = useState(false);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [agentOrder, setAgentOrder] = useState<string[]>(block.agents);
@@ -211,8 +213,23 @@ export default function BlockView({
     [block.agents, agents]
   );
 
+  const removeTargetName = removeTarget
+    ? availableAgents.find((a) => a.id === removeTarget)?.name ?? removeTarget
+    : "";
+
   return (
     <div className="flex flex-col gap-6">
+      <ConfirmDialog
+        open={removeTarget !== null}
+        title="Удалить агента?"
+        message={`Агент «${removeTargetName}» будет удалён из блока «${block.name}».`}
+        confirmLabel="Удалить"
+        onCancel={() => setRemoveTarget(null)}
+        onConfirm={() => {
+          if (removeTarget && onRemoveAgent) onRemoveAgent(block.id, removeTarget);
+          setRemoveTarget(null);
+        }}
+      />
       {/* Block header */}
       <div>
         <div className="flex items-center justify-between">
@@ -304,11 +321,11 @@ export default function BlockView({
                   {agentInfo?.name || agentId}
                   {!isActive && (
                     <button
-                      onClick={() => onRemoveAgent(block.id, agentId)}
-                      className="ml-0.5 text-gray-600 hover:text-red-400 transition-colors"
+                      onClick={() => setRemoveTarget(agentId)}
+                      className="ml-1 w-5 h-5 inline-flex items-center justify-center rounded-full text-gray-400 hover:text-white hover:bg-red-500/70 transition-colors text-sm leading-none"
                       title="Удалить агента"
                     >
-                      x
+                      ✕
                     </button>
                   )}
                 </span>

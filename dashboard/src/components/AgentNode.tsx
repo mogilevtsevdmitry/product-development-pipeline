@@ -2,6 +2,7 @@
 
 import { memo, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 export interface AgentNodeData {
   label: string;
@@ -38,6 +39,7 @@ function AgentNodeComponent({ id, data }: NodeProps) {
   const phaseColor = PHASE_COLORS[nodeData.phase] ?? "text-gray-400";
   const [hovered, setHovered] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const projectId = nodeData.projectId;
 
@@ -59,6 +61,14 @@ function AgentNodeComponent({ id, data }: NodeProps) {
   const status = nodeData.status;
 
   return (
+    <>
+    <ConfirmDialog
+      open={showConfirm}
+      title="Удалить агента?"
+      message={`Агент «${nodeData.label}» будет удалён из пайплайна. Соседние агенты соединятся автоматически.`}
+      onCancel={() => setShowConfirm(false)}
+      onConfirm={() => { setShowConfirm(false); sendAction("remove_agent"); }}
+    />
     <div
       className={`relative rounded-lg border-2 ${style.border} ${style.bg} px-4 py-3 min-w-[160px] max-w-[220px] shadow-lg`}
       onMouseEnter={() => setHovered(true)}
@@ -114,9 +124,7 @@ function AgentNodeComponent({ id, data }: NodeProps) {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                if (confirm(`Удалить агента из пайплайна? Соседние агенты будут соединены автоматически.`)) {
-                  sendAction("remove_agent");
-                }
+                setShowConfirm(true);
               }}
               className="p-1 rounded hover:bg-red-500/20 text-red-400 text-xs"
               title="Удалить из пайплайна"
@@ -155,6 +163,7 @@ function AgentNodeComponent({ id, data }: NodeProps) {
         className="!bg-gray-500 !w-2 !h-2 !border-0"
       />
     </div>
+    </>
   );
 }
 

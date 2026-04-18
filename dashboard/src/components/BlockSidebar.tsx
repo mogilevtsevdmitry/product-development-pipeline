@@ -217,10 +217,10 @@ export default function BlockSidebar({
               className={`
                 relative group px-3 py-2.5 mx-1 my-0.5 rounded-md cursor-pointer
                 transition-colors duration-100
-                ${isBlocked ? "opacity-50 cursor-not-allowed" : "hover:bg-gray-900"}
+                ${isBlocked ? "opacity-60 hover:opacity-100 hover:bg-gray-900" : "hover:bg-gray-900"}
                 ${isSelected ? "bg-gray-800 border-l-2 border-blue-500" : "border-l-2 border-transparent"}
               `}
-              onClick={() => !isBlocked && onSelectBlock(block.id)}
+              onClick={() => onSelectBlock(block.id)}
               onMouseEnter={() => setHoveredId(block.id)}
               onMouseLeave={() => setHoveredId(null)}
               title={
@@ -235,7 +235,7 @@ export default function BlockSidebar({
                   {block.name}
                 </span>
 
-                {isHovered && !isBlocked && (
+                {isHovered && (
                   <div className="flex items-center gap-1 shrink-0">
                     {onEditBlock && (
                       <button

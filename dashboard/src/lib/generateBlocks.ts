@@ -2,9 +2,7 @@
  * Generate pipeline blocks from project description using Claude.
  * Called after project creation to auto-populate blocks with relevant agents.
  */
-import { spawnSync } from "child_process";
-import fs from "fs";
-import path from "path";
+import { spawn } from "child_process";
 import {
   getProjectState,
   saveProjectState,
@@ -82,51 +80,187 @@ interface BlockDef {
  * Generate blocks for a project from its description.
  * Runs synchronously via claude --print.
  */
-export function generateBlocksForProject(projectId: string): boolean {
-  const state = getProjectState(projectId);
-  if (!state) return false;
+// Haiku 4.5 pricing per 1M tokens (USD)
+const PRICE_INPUT_PER_M = 1.0;
+const PRICE_OUTPUT_PER_M = 5.0;
+const PRICE_CACHE_READ_PER_M = 0.1;
+const PRICE_CACHE_WRITE_PER_M = 1.25;
 
-  // Don't regenerate if blocks already exist
-  if (state.blocks && state.blocks.length > 0) return true;
-
-  const description = state.description || state.name;
-
-  const fullPrompt = `${PROMPT}\n\n## Описание продукта\n\n${description}`;
-
-  try {
-    // Write prompt to temp file to avoid shell escaping issues
-    const os = require("os");
-    const tmpFile = path.join(os.tmpdir(), `gen-blocks-${projectId}-${Date.now()}.md`);
-    fs.writeFileSync(tmpFile, fullPrompt, "utf-8");
-
-    const result = spawnSync(
-      "/bin/sh",
-      ["-c", `cat "${tmpFile}" | claude --print --model claude-haiku-4-5 --dangerously-skip-permissions`],
-      {
-        timeout: 60000,
-        env: {
-          ...process.env,
-          PATH: "/Users/dmitry/.nvm/versions/node/v22.20.0/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-        },
-      }
-    );
-
-    try { fs.unlinkSync(tmpFile); } catch { /* */ }
-
-    const output = result.stdout?.toString().trim() || "";
-    if (!output) return false;
-
-    // Parse JSON from output
-    const blocks = parseBlocksJson(output);
-    if (!blocks || blocks.length === 0) return false;
-
-    // Apply blocks to state
-    applyBlocks(projectId, blocks);
-    return true;
-  } catch {
-    return false;
-  }
+function computeCost(u: { input: number; output: number; cacheRead: number; cacheWrite: number }): number {
+  return (
+    (u.input / 1_000_000) * PRICE_INPUT_PER_M +
+    (u.output / 1_000_000) * PRICE_OUTPUT_PER_M +
+    (u.cacheRead / 1_000_000) * PRICE_CACHE_READ_PER_M +
+    (u.cacheWrite / 1_000_000) * PRICE_CACHE_WRITE_PER_M
+  );
 }
+
+export function generateBlocksForProject(projectId: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const state = getProjectState(projectId);
+    if (!state) return resolve(false);
+
+    if (state.blocks && state.blocks.length > 0) {
+      state.generation_status = "done";
+      state.generation_error = undefined;
+      saveProjectState(projectId, state);
+      return resolve(true);
+    }
+
+    state.generation_status = "generating";
+    state.generation_error = undefined;
+    state.generation_tokens_in = 0;
+    state.generation_tokens_out = 0;
+    state.generation_cost_usd = 0;
+    state.generation_started_at = new Date().toISOString();
+    saveProjectState(projectId, state);
+
+    const description = state.description || state.name;
+    const fullPrompt = `${PROMPT}\n\n## Описание продукта\n\n${description}`;
+
+    const markFailed = (msg: string) => {
+      const s = getProjectState(projectId);
+      if (!s) return;
+      s.generation_status = "failed";
+      s.generation_error = msg;
+      saveProjectState(projectId, s);
+    };
+
+    const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    let assistantText = "";
+    let finalCostUsd: number | null = null;
+    let lastPersist = 0;
+
+    const persistUsage = (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastPersist < 400) return;
+      lastPersist = now;
+      const s = getProjectState(projectId);
+      if (!s) return;
+      s.generation_tokens_in = usage.input + usage.cacheRead + usage.cacheWrite;
+      s.generation_tokens_out = usage.output;
+      s.generation_cost_usd = finalCostUsd ?? computeCost(usage);
+      saveProjectState(projectId, s);
+    };
+
+    try {
+      const child = spawn(
+        "claude",
+        [
+          "--print",
+          "--input-format", "text",
+          "--output-format", "stream-json",
+          "--verbose",
+          "--model", "claude-haiku-4-5",
+          "--dangerously-skip-permissions",
+        ],
+        {
+          env: {
+            ...process.env,
+            PATH: `${process.env.HOME}/.local/bin:/opt/homebrew/bin:/Users/dmitry/.nvm/versions/node/v22.20.0/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
+          },
+          stdio: ["pipe", "pipe", "pipe"],
+        }
+      );
+
+      let settled = false;
+      const finish = (fn: () => void) => { if (!settled) { settled = true; fn(); } };
+      const timer = setTimeout(() => {
+        try { child.kill("SIGTERM"); } catch { /* */ }
+        finish(() => {
+          markFailed("Превышен таймаут 120s при запросе к Claude");
+          resolve(false);
+        });
+      }, 120_000);
+
+      child.on("error", (err) => {
+        clearTimeout(timer);
+        finish(() => {
+          markFailed(`Не удалось запустить claude CLI: ${err.message}`);
+          resolve(false);
+        });
+      });
+
+      let stdoutBuf = "";
+      let stderrBuf = "";
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdoutBuf += chunk.toString();
+        let nl;
+        while ((nl = stdoutBuf.indexOf("\n")) !== -1) {
+          const line = stdoutBuf.slice(0, nl).trim();
+          stdoutBuf = stdoutBuf.slice(nl + 1);
+          if (!line) continue;
+          try {
+            const evt = JSON.parse(line);
+            const u = evt?.message?.usage ?? evt?.usage;
+            if (u) {
+              if (typeof u.input_tokens === "number") usage.input = u.input_tokens;
+              if (typeof u.output_tokens === "number") usage.output = u.output_tokens;
+              if (typeof u.cache_read_input_tokens === "number") usage.cacheRead = u.cache_read_input_tokens;
+              if (typeof u.cache_creation_input_tokens === "number") usage.cacheWrite = u.cache_creation_input_tokens;
+            }
+            if (typeof evt?.total_cost_usd === "number") finalCostUsd = evt.total_cost_usd;
+            if (evt?.type === "assistant" && Array.isArray(evt.message?.content)) {
+              for (const c of evt.message.content) {
+                if (c?.type === "text" && typeof c.text === "string") assistantText += c.text;
+              }
+            }
+            if (evt?.type === "result" && typeof evt.result === "string") {
+              assistantText = evt.result;
+            }
+            persistUsage();
+          } catch { /* not JSON — ignore */ }
+        }
+      });
+      child.stderr.on("data", (c: Buffer) => { stderrBuf += c.toString(); });
+
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        if (settled) return;
+        persistUsage(true);
+        if (code !== 0) {
+          finish(() => {
+            markFailed(`claude CLI завершился с кодом ${code}${stderrBuf ? `: ${stderrBuf.trim().slice(0, 300)}` : ""}`);
+            resolve(false);
+          });
+          return;
+        }
+        const output = assistantText.trim();
+        if (!output) {
+          finish(() => { markFailed("Claude вернул пустой ответ"); resolve(false); });
+          return;
+        }
+        const blocks = parseBlocksJson(output);
+        if (!blocks || blocks.length === 0) {
+          finish(() => {
+            markFailed(`Не удалось распарсить JSON из ответа Claude: ${output.slice(0, 300)}`);
+            resolve(false);
+          });
+          return;
+        }
+        applyBlocks(projectId, blocks);
+        const s = getProjectState(projectId);
+        if (s) {
+          s.generation_status = "done";
+          s.generation_error = undefined;
+          s.generation_tokens_in = usage.input + usage.cacheRead + usage.cacheWrite;
+          s.generation_tokens_out = usage.output;
+          s.generation_cost_usd = finalCostUsd ?? computeCost(usage);
+          saveProjectState(projectId, s);
+        }
+        finish(() => resolve(true));
+      });
+
+      child.stdin.write(fullPrompt);
+      child.stdin.end();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      markFailed(`Неожиданная ошибка: ${msg}`);
+      resolve(false);
+    }
+  });
+}
+
 
 function parseBlocksJson(output: string): BlockDef[] | null {
   // Try direct parse

@@ -3046,10 +3046,9 @@ export function removeAgentFromPipeline(id: string, agentId: string): {
 } {
   const state = getProjectState(id);
   if (!state) return { ok: false, error: "Проект не найден" };
-  if (!state.agents[agentId]) return { ok: false, error: "Агент не найден" };
 
   // Don't remove running agents
-  if (state.agents[agentId].status === "running") {
+  if (state.agents[agentId]?.status === "running") {
     return { ok: false, error: "Нельзя удалить работающего агента" };
   }
 
@@ -3086,6 +3085,14 @@ export function removeAgentFromPipeline(id: string, agentId: string): {
   state.pipeline_graph.parallel_groups = state.pipeline_graph.parallel_groups
     .map(group => group.filter(n => n !== agentId))
     .filter(group => group.length > 0);
+
+  // Remove from all schema-v2 blocks (agents + edges)
+  if (Array.isArray(state.blocks)) {
+    for (const b of state.blocks) {
+      b.agents = b.agents.filter((a) => a !== agentId);
+      b.edges = b.edges.filter(([s, t]) => s !== agentId && t !== agentId);
+    }
+  }
 
   // Remove agent state
   delete state.agents[agentId];

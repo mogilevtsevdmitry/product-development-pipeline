@@ -175,7 +175,7 @@ export default function ProjectPage({
     (a) => a.status === "completed" || a.status === "skipped"
   ).length;
 
-  // Aggregate tokens & cost
+  // Aggregate tokens & cost (agents + pipeline generation)
   const projectStats = Object.values(state.agents).reduce(
     (acc, a) => {
       const u = a.total_usage ?? a.usage;
@@ -187,6 +187,8 @@ export default function ProjectPage({
     },
     { tokens: 0, cost: 0 }
   );
+  projectStats.tokens += (state.generation_tokens_in ?? 0) + (state.generation_tokens_out ?? 0);
+  projectStats.cost += state.generation_cost_usd ?? 0;
 
   const formatTokens = (n: number) =>
     n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(1)}K` : String(n);
@@ -256,11 +258,31 @@ export default function ProjectPage({
           {state.pipeline_type === "debate" ? (
             <DebateView projectId={state.project_id} state={state} />
           ) : state.blocks.length === 0 && state.description ? (
-            <div className="flex flex-col items-center justify-center h-full text-gray-500 gap-3">
-              <div className="animate-spin h-6 w-6 border-2 border-blue-400 border-t-transparent rounded-full" />
-              <p className="text-sm">Генерация пайплайна из описания проекта...</p>
-              <p className="text-xs text-gray-600">Claude анализирует описание и подбирает агентов</p>
-            </div>
+            state.generation_status === "failed" ? (
+              <div className="flex flex-col items-center justify-center h-full gap-4 max-w-lg mx-auto text-center">
+                <div className="text-4xl">⚠️</div>
+                <p className="text-sm text-red-400 font-medium">Не удалось сгенерировать пайплайн</p>
+                {state.generation_error && (
+                  <pre className="text-xs text-gray-500 whitespace-pre-wrap break-words bg-black/30 p-3 rounded-md border border-red-900/40 max-h-60 overflow-auto w-full text-left">
+                    {state.generation_error}
+                  </pre>
+                )}
+                <button
+                  onClick={async () => {
+                    await fetch(`/api/state/${state.project_id}/regenerate-blocks`, { method: "POST" });
+                  }}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-md transition"
+                >
+                  Повторить
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-gray-500 gap-3">
+                <div className="animate-spin h-6 w-6 border-2 border-blue-400 border-t-transparent rounded-full" />
+                <p className="text-sm">Генерация пайплайна из описания проекта...</p>
+                <p className="text-xs text-gray-600">Claude анализирует описание и подбирает агентов</p>
+              </div>
+            )
           ) : selectedBlock && selectedBlockStatus ? (
             <BlockView
               block={selectedBlock}

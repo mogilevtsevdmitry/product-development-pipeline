@@ -270,6 +270,13 @@ export interface ProjectState {
   // Pipeline type: standard (DAG blocks) or debate (AgentHQ 3-agent cycle)
   pipeline_type?: "standard" | "debate";
   debate?: DebateState;
+  // Pipeline blocks generation status (auto-populated after project creation)
+  generation_status?: "generating" | "failed" | "done";
+  generation_error?: string;
+  generation_tokens_in?: number;
+  generation_tokens_out?: number;
+  generation_cost_usd?: number;
+  generation_started_at?: string;
   schema_version: number;
 }
 
