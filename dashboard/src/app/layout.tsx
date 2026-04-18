@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { LegacyHeader } from "@/components/LegacyHeader";
 
 export const metadata: Metadata = {
   title: "Product Pipeline",
@@ -15,29 +16,12 @@ export default function RootLayout({
     <html lang="ru" className="dark">
       <head>
         <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
           rel="stylesheet"
         />
       </head>
-      <body className="min-h-screen bg-gray-950 text-white antialiased">
-        <header className="border-b border-gray-800 bg-gray-950/80 backdrop-blur-sm sticky top-0 z-50">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
-            <a href="/" className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-sm font-bold">
-                PP
-              </div>
-              <span className="font-semibold text-lg">Product Pipeline</span>
-            </a>
-            <nav className="flex items-center gap-4 text-sm text-gray-400">
-              <a href="/" className="hover:text-white transition-colors">
-                Проекты
-              </a>
-              <a href="/agents" className="hover:text-white transition-colors">
-                Агенты
-              </a>
-            </nav>
-          </div>
-        </header>
+      <body className="min-h-screen antialiased" style={{ background: "var(--bg-0)", color: "var(--text-1)" }}>
+        <LegacyHeader />
         <main>{children}</main>
       </body>
     </html>

@@ -1,0 +1,270 @@
+/* ==========================================================================
+   Product Pipeline — Design Tokens
+   Dark-first. OKLCH-based source of truth. All visual design references
+   these variables via var(--...). Do NOT hardcode hex in components.
+
+   Accent contract (dual-accent system):
+   - --accent-system  (lime)   — dashboard chrome: switcher, global nav,
+                                 top-level CTAs (+ Новый проект), today-marker.
+                                 Signals "I'm working across projects".
+   - --accent-project (indigo) — actions inside a single project: edit, save,
+                                 apply, revert. Signals "I'm acting on this
+                                 item". Never on the same screen as a lime CTA
+                                 unless clearly disambiguated by hierarchy.
+
+   Fonts are imported from globals.css (must be first @import in bundle).
+   ========================================================================== */
+
+:root {
+  /* ---------- Surfaces (equal ΔL ≈ 3% steps, hue 275 cool-neutral) ---------- */
+  --bg-0: oklch(14% 0.010 275);  /* app canvas */
+  --bg-1: oklch(17% 0.012 275);  /* raised panels, cards */
+  --bg-2: oklch(21% 0.014 275);  /* card surface 2, inputs */
+  --bg-3: oklch(26% 0.015 275);  /* hover, selected */
+  --bg-4: oklch(31% 0.016 275);  /* pressed, chip bg */
+
+  /* ---------- Text (4 hierarchy steps, APCA-tuned on bg-0) ---------- */
+  --text-1: oklch(97% 0.005 275);   /* primary — Lc ~105 on bg-0 */
+  --text-2: oklch(83% 0.010 275);   /* body — Lc ~85 */
+  --text-3: oklch(65% 0.015 275);   /* muted labels — Lc ~62 */
+  --text-4: oklch(50% 0.015 275);   /* meta, disabled — Lc ~45 (raised from #5c6170) */
+
+  /* ---------- Borders (alpha-based so they adapt with elevation) ---------- */
+  --border-1: rgba(255,255,255,.06);
+  --border-2: rgba(255,255,255,.10);
+  --border-3: rgba(255,255,255,.14);
+
+  /* ---------- Accent: system (lime) — dashboard chrome ---------- */
+  --accent-lime:         oklch(94% 0.22 128);          /* bright — text/CTA */
+  --accent-lime-hover:   oklch(96% 0.22 128);
+  --accent-lime-surf:    oklch(72% 0.18 128);          /* muted — large fills, today-marker */
+  --accent-lime-fg:      oklch(14% 0.010 275);         /* dark text on lime */
+  --accent-soft:         color-mix(in oklab, oklch(94% 0.22 128) 14%, transparent);
+  --accent-soft-border:  color-mix(in oklab, oklch(94% 0.22 128) 32%, transparent);
+
+  /* ---------- Accent: project (indigo) — in-project actions ---------- */
+  --accent-project:        oklch(60% 0.18 258);
+  --accent-project-hover:  oklch(66% 0.18 258);
+  --accent-project-soft:   color-mix(in oklab, oklch(60% 0.18 258) 14%, transparent);
+  --accent-project-border: color-mix(in oklab, oklch(60% 0.18 258) 32%, transparent);
+
+  /* ---------- Status palette (unified L=72%, C=0.15; each hue reserved) ---------- */
+  --run:         oklch(70% 0.15 255);  /* soft blue */
+  --run-soft:    color-mix(in oklab, oklch(70% 0.15 255) 14%, transparent);
+  --run-border:  color-mix(in oklab, oklch(70% 0.15 255) 32%, transparent);
+
+  --ok:          oklch(75% 0.17 150);
+  --ok-soft:     color-mix(in oklab, oklch(75% 0.17 150) 14%, transparent);
+  --ok-border:   color-mix(in oklab, oklch(75% 0.17 150) 30%, transparent);
+
+  --warn:        oklch(80% 0.15 85);
+  --warn-soft:   color-mix(in oklab, oklch(80% 0.15 85) 14%, transparent);
+  --warn-border: color-mix(in oklab, oklch(80% 0.15 85) 32%, transparent);
+
+  --err:         oklch(70% 0.18 15);   /* softer err for status badges (non-destructive) */
+  --err-soft:    color-mix(in oklab, oklch(70% 0.18 15) 14%, transparent);
+  --err-border:  color-mix(in oklab, oklch(70% 0.18 15) 32%, transparent);
+
+  --wait:        oklch(62% 0.010 275);
+  --wait-soft:   color-mix(in oklab, oklch(62% 0.010 275) 12%, transparent);
+  --wait-border: color-mix(in oklab, oklch(62% 0.010 275) 24%, transparent);
+
+  /* ---------- Destructive (dedicated, not the same as status err) ----------
+     Use for rollback, delete, irreversible actions. Higher chroma + truer red. */
+  --destructive:        oklch(58% 0.22 25);
+  --destructive-hover:  oklch(65% 0.22 25);
+  --destructive-soft:   color-mix(in oklab, oklch(58% 0.22 25) 14%, transparent);
+  --destructive-border: color-mix(in oklab, oklch(58% 0.22 25) 36%, transparent);
+  --destructive-fg:     oklch(97% 0.005 275);
+
+  /* ---------- Focus ring (WCAG 2.2 §2.4.11/13) ----------
+     Double-layer: inner canvas gap + outer accent, always visible on any bg. */
+  --focus-ring: 0 0 0 2px var(--bg-0), 0 0 0 4px var(--accent-lime);
+  --focus-ring-project: 0 0 0 2px var(--bg-0), 0 0 0 4px var(--accent-project);
+
+  /* ---------- Phase hues (L=78%, C=0.13) ----------
+     Each hue is >= 15° from reserved status hues (ok 150, run 255, warn 85, err 15).
+     ph-product shifted from 250° to 230° to avoid collision with --run. */
+  --ph-release:    oklch(78% 0.13 5);
+  --ph-legal:      oklch(78% 0.13 45);
+  --ph-quality:    oklch(78% 0.13 110);
+  --ph-design:     oklch(78% 0.13 135);
+  --ph-feedback:   oklch(78% 0.13 175);
+  --ph-meta:       oklch(78% 0.13 195);
+  --ph-dev:        oklch(78% 0.13 215);
+  --ph-product:    oklch(78% 0.13 230);
+  --ph-content:    oklch(78% 0.13 270);
+  --ph-research:   oklch(78% 0.13 290);
+  --ph-marketing:  oklch(78% 0.13 330);
+
+  /* ---------- Semantic aliases (legacy API, now thin pointers) ---------- */
+  --bg-primary:   var(--bg-0);
+  --bg-surface:   var(--bg-1);
+  --bg-surface-2: var(--bg-2);
+  --bg-surface-3: var(--bg-3);
+  --bg-overlay:   color-mix(in oklab, var(--bg-0) 80%, transparent);
+
+  --fg-primary:   var(--text-1);
+  --fg-secondary: var(--text-2);
+  --fg-muted:     var(--text-3);
+  --fg-subtle:    var(--text-3);
+  --fg-faint:     var(--text-4);
+
+  --border-default: var(--border-1);
+  --border-strong:  var(--border-2);
+  --border-subtle:  var(--border-1);
+
+  /* Legacy action aliases — kept for components not yet migrated.
+     New code should prefer --accent-lime / --accent-project explicitly. */
+  --accent:         var(--accent-project);
+  --accent-hover:   var(--accent-project-hover);
+  --accent-soft-bg: var(--accent-project-soft);
+  --accent-soft-fg: var(--accent-project);
+
+  /* Legacy status aliases */
+  --status-success:    var(--ok);
+  --status-success-bg: var(--ok-soft);
+  --status-running:    var(--run);
+  --status-running-bg: var(--run-soft);
+  --status-warning:    var(--warn);
+  --status-warning-bg: var(--warn-soft);
+  --status-error:      var(--err);
+  --status-error-bg:   var(--err-soft);
+  --status-pending:    var(--wait);
+  --status-pending-bg: var(--wait-soft);
+
+  /* Legacy phase aliases (match agent phase naming in CLAUDE.md) */
+  --phase-research:    var(--ph-research);
+  --phase-product:     var(--ph-product);
+  --phase-meta:        var(--ph-meta);
+  --phase-legal:       var(--ph-legal);
+  --phase-design:      var(--ph-design);
+  --phase-development: var(--ph-dev);
+  --phase-quality:     var(--ph-quality);
+  --phase-release:     var(--ph-release);
+  --phase-marketing:   var(--ph-marketing);
+  --phase-feedback:    var(--ph-feedback);
+  --phase-content:     var(--ph-content);
+
+  /* ---------- Typography — Families ---------- */
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* ---------- Typography — Scale ---------- */
+  --text-2xs:  11px;
+  --text-xs:   12px;
+  --text-sm:   14px;
+  --text-base: 16px;
+  --text-lg:   18px;
+  --text-xl:   20px;
+  --text-2xl:  24px;
+  --text-3xl:  30px;
+  --text-4xl:  36px;
+
+  --font-normal:   400;
+  --font-medium:   500;
+  --font-semibold: 600;
+  --font-bold:     700;
+
+  --leading-tight:   1.2;
+  --leading-snug:    1.375;
+  --leading-normal:  1.5;
+  --leading-relaxed: 1.625;
+
+  --tracking-tight:  -0.01em;
+  --tracking-normal: 0;
+  --tracking-wide:   0.04em;
+  --tracking-wider:  0.1em;
+
+  /* ---------- Space & layout ---------- */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ---------- Radius ---------- */
+  --radius-sm:   4px;
+  --radius-md:   6px;
+  --radius-lg:   8px;
+  --radius-xl:   12px;
+  --radius-2xl:  16px;
+  --radius-full: 9999px;
+
+  /* ---------- Shadows ---------- */
+  --shadow-sm:  0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md:  0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+  --shadow-lg:  0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
+  --shadow-xl:  0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+  --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+
+  /* ---------- Motion ---------- */
+  --duration-fast:   100ms;
+  --duration-base:   200ms;
+  --duration-slow:   300ms;
+  --duration-slower: 500ms;
+  --ease:            cubic-bezier(.4, 0, .2, 1);
+  --ease-standard:   cubic-bezier(.4, 0, .2, 1);
+  --ease-out:        cubic-bezier(0, 0, .2, 1);
+  --ease-in:         cubic-bezier(.4, 0, 1, 1);
+}
+
+/* ==========================================================================
+   Base element styles
+   ========================================================================== */
+html, body {
+  background: var(--bg-0);
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Global focus-visible — applies to any interactive element by default. */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-md);
+}
+
+/* ==========================================================================
+   Semantic typography classes
+   ========================================================================== */
+.h1 { font-size: var(--text-2xl); font-weight: var(--font-bold);     line-height: var(--leading-tight); letter-spacing: var(--tracking-tight); color: var(--text-1); }
+.h2 { font-size: var(--text-xl);  font-weight: var(--font-bold);     line-height: var(--leading-tight); color: var(--text-1); }
+.h3 { font-size: var(--text-lg);  font-weight: var(--font-semibold); line-height: var(--leading-snug);  color: var(--text-1); }
+.h4 { font-size: var(--text-base); font-weight: var(--font-semibold); line-height: var(--leading-snug); color: var(--text-1); }
+.body    { font-size: var(--text-sm); color: var(--text-2); line-height: var(--leading-relaxed); }
+.body-sm { font-size: var(--text-xs); color: var(--text-3); line-height: var(--leading-normal); }
+.label   { font-size: var(--text-xs); color: var(--text-3); font-weight: var(--font-medium); }
+.eyebrow { font-size: var(--text-xs); color: var(--text-3); font-weight: var(--font-semibold); text-transform: uppercase; letter-spacing: var(--tracking-wider); }
+
+.code, code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--bg-2);
+  color: var(--warn);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+.mono { font-family: var(--font-mono); }
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: var(--radius-full); border: 2px solid var(--bg-0); }
+::-webkit-scrollbar-thumb:hover { background: var(--bg-4); }
+
+/* Pulse for live status dots */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .4; }
+}
+.animate-pulse-dot { animation: pulse-dot 1.5s ease-in-out infinite; }

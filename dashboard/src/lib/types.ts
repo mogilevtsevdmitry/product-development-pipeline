@@ -263,8 +263,10 @@ export interface ProjectState {
   // Web project detection & Docker preview
   is_web_project?: boolean;
   preview?: PreviewState;
-  // Auto-advance: skip block approvals, run pipeline end-to-end
+  // Auto-advance: skip agent-level confirmations, run pipeline end-to-end
   auto_advance?: boolean;
+  // Full auto: auto_advance + auto-approve block gates (fire-and-forget)
+  full_auto?: boolean;
   // Pipeline type: standard (DAG blocks) or debate (AgentHQ 3-agent cycle)
   pipeline_type?: "standard" | "debate";
   debate?: DebateState;

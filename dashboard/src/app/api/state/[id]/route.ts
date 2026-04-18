@@ -65,6 +65,39 @@ export async function POST(
     return NextResponse.json({ ok: true });
   }
 
+  if (body.action === "set_full_auto") {
+    const st = getProjectState(id);
+    if (!st) return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
+    const enabled = !!body.enabled;
+    (st as unknown as { full_auto?: boolean }).full_auto = enabled;
+    if (enabled) {
+      st.auto_advance = true;
+      st.mode = "auto";
+    }
+    st.updated_at = new Date().toISOString();
+    saveProjectState(id, st);
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "update_description") {
+    const st = getProjectState(id);
+    if (!st) return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
+    st.description = typeof body.description === "string" ? body.description : "";
+    st.updated_at = new Date().toISOString();
+    saveProjectState(id, st);
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "update_project_path") {
+    const st = getProjectState(id);
+    if (!st) return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
+    const path = typeof body.project_path === "string" ? body.project_path.trim() : "";
+    st.project_path = path || undefined;
+    st.updated_at = new Date().toISOString();
+    saveProjectState(id, st);
+    return NextResponse.json({ ok: true });
+  }
+
   if (body.action === "switch_mode" && body.mode) {
     const ok = switchMode(id, body.mode as PipelineMode);
     if (!ok) return NextResponse.json({ error: "Не удалось переключить режим" }, { status: 400 });
