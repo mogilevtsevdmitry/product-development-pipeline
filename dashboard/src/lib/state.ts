@@ -2420,37 +2420,86 @@ function scheduleRateLimitRetry(
   }
 
   state.status = "paused";
+  state.rate_limit_retry_at = retryAt;
+  state.rate_limit_blocked_agent = agentId;
   state.updated_at = new Date().toISOString();
   const fp = path.join(STATE_DIR, `${projectId}.json`);
   fs.writeFileSync(fp, JSON.stringify(state, null, 2), "utf-8");
 
-  // Track retry
+  armRateLimitTimer(projectId, agentId, delayMs);
+}
+
+/** Pending retry timers: projectId → NodeJS.Timeout */
+const rateLimitTimers = new Map<string, NodeJS.Timeout>();
+
+function armRateLimitTimer(projectId: string, agentId: string, delayMs: number): void {
   if (!pendingRetries.has(projectId)) pendingRetries.set(projectId, new Set());
   pendingRetries.get(projectId)!.add(agentId);
 
-  // Schedule retry timer
-  setTimeout(() => {
+  const prev = rateLimitTimers.get(projectId);
+  if (prev) clearTimeout(prev);
+
+  const timer = setTimeout(() => {
+    rateLimitTimers.delete(projectId);
     console.log(`[RateLimit] Retry timer fired for ${projectId}`);
     const retryState = getProjectState(projectId);
     if (!retryState) return;
 
-    // Clear error messages
     for (const agent of Object.values(retryState.agents)) {
       if (agent.error?.includes("rate limit") || agent.error?.includes("Пауза (rate limit)")) {
         agent.error = null;
       }
     }
 
-    // Resume pipeline
     retryState.status = "running";
+    retryState.rate_limit_retry_at = undefined;
+    retryState.rate_limit_blocked_agent = undefined;
     retryState.updated_at = new Date().toISOString();
     const retryFp = path.join(STATE_DIR, `${projectId}.json`);
     fs.writeFileSync(retryFp, JSON.stringify(retryState, null, 2), "utf-8");
 
-    // Launch ready agents
     pendingRetries.get(projectId)?.delete(agentId);
     runNextAgent(projectId);
-  }, delayMs);
+  }, Math.max(0, delayMs));
+  rateLimitTimers.set(projectId, timer);
+}
+
+/**
+ * Cold-restore: on module load, scan all project state files and reschedule
+ * rate-limit retry timers for paused projects. Without this, if the dashboard
+ * server restarts between the pause and the retry time, projects would stay
+ * stuck in `paused` forever.
+ */
+export function restoreRateLimitRetries(): void {
+  try {
+    if (!fs.existsSync(STATE_DIR)) return;
+    const files = fs.readdirSync(STATE_DIR).filter((f) => f.endsWith(".json"));
+    let restored = 0;
+    for (const f of files) {
+      try {
+        const raw = fs.readFileSync(path.join(STATE_DIR, f), "utf-8");
+        const s = JSON.parse(raw) as ProjectState;
+        if (s.status !== "paused" || !s.rate_limit_retry_at || !s.rate_limit_blocked_agent) continue;
+        const retryAtMs = new Date(s.rate_limit_retry_at).getTime();
+        if (!Number.isFinite(retryAtMs)) continue;
+        const delay = retryAtMs - Date.now();
+        console.log(`[RateLimit] Cold-restore ${s.project_id}: retry in ${Math.max(0, Math.round(delay / 1000))}s`);
+        armRateLimitTimer(s.project_id, s.rate_limit_blocked_agent, delay);
+        restored++;
+      } catch { /* skip bad file */ }
+    }
+    if (restored > 0) console.log(`[RateLimit] Restored ${restored} pending retry timer(s)`);
+  } catch (err) {
+    console.error("[RateLimit] Cold-restore failed:", err);
+  }
+}
+
+// Run cold-restore once per process on module load
+let _coldRestoreDone = false;
+if (!_coldRestoreDone) {
+  _coldRestoreDone = true;
+  // Defer to next tick so all module-level constants (STATE_DIR etc.) are initialized
+  setImmediate(() => restoreRateLimitRetries());
 }
 
 /**

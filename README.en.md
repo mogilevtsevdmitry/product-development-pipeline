@@ -141,6 +141,17 @@ product-development-pipeline/
 | `auto` | Full automation, stops only at gate checkpoints |
 | `human_approval` | Requires confirmation after each agent |
 
+## Rate-limit resilience
+
+When Claude returns `rate limit` / `429` / `quota` / `token limit` during an agent run, the pipeline **auto-pauses and resumes at the top of the next hour**:
+
+1. The failed agent is set back to `pending` with `⏳ Rate limit — retry at HH:MM`.
+2. All parallel agents of this project are killed (`SIGKILL` + `pkill`) to avoid wasting tokens.
+3. Project status flips to `paused`; the retry time is persisted in state (`rate_limit_retry_at`).
+4. At `HH:01` a timer clears the error flags, flips status back to `running`, and calls `runNextAgent`.
+
+**Cold-restore**: on dashboard server startup ([state.ts](dashboard/src/lib/state.ts) → `restoreRateLimitRetries`), all `orchestrator/state/*.json` files are scanned — any `paused` project with a future `rate_limit_retry_at` gets its timer re-armed. Restarting the server during a pause does not break recovery.
+
 ## Dashboard
 
 Web interface for pipeline management:

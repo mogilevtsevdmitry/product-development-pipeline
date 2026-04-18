@@ -277,6 +277,9 @@ export interface ProjectState {
   generation_tokens_out?: number;
   generation_cost_usd?: number;
   generation_started_at?: string;
+  // Rate-limit retry (persisted so timers survive server restart)
+  rate_limit_retry_at?: string;
+  rate_limit_blocked_agent?: string;
   schema_version: number;
 }
 
