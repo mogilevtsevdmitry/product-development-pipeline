@@ -3,6 +3,10 @@
 /sova/
 orchestrator/state/*.json
 
+# Agents live only locally — the public repo keeps agents/ empty.
+/agents/*
+!/agents/.gitkeep
+
 # === Secrets ===
 .env
 .env.*
