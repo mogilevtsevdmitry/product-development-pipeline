@@ -259,6 +259,15 @@ def _run_single_agent(
     if agent_id == "pipeline-architect" and result["status"] == "completed":
         state = _expand_pipeline_graph(state)
 
+    # Verdict-loop: если агент успешно завершился, проверяем его вердикт
+    # из SUMMARY.md и при необходимости отправляем upstream-агентов на rework.
+    if result["status"] == "completed":
+        from verdict_handler import handle_verdict, apply_action, save_verdict_to_state
+        save_verdict_to_state(state, agent_id)  # сохраняем вердикт в state для UI
+        action = handle_verdict(state, agent_id)
+        if action.triggered:
+            apply_action(state, agent_id, action)
+
     return state
 
 

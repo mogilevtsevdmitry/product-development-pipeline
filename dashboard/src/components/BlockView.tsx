@@ -311,14 +311,39 @@ export default function BlockView({
           <div className="flex flex-wrap gap-1.5 mt-3">
             {block.agents.map((agentId) => {
               const agentInfo = availableAgents.find((a) => a.id === agentId);
-              const agentStatus = agents[agentId]?.status;
+              const agentState = agents[agentId];
+              const agentStatus = agentState?.status;
               const isActive = agentStatus === "running" || agentStatus === "completed";
+              const verdict = agentState?.verdict;
+              const reworkRound = agentState?.rework_round;
+              // Verdict badge: 🚫 / ⚠️ / ✓ + tooltip с verdict_summary
+              const verdictBadge =
+                verdict === "no-go" ? { icon: "🚫", color: "text-red-400 border-red-500/40 bg-red-950/40", label: "No-Go" } :
+                verdict === "needs_rework" ? { icon: "↻", color: "text-amber-400 border-amber-500/40 bg-amber-950/40", label: "Rework" } :
+                verdict === "go" ? { icon: "✓", color: "text-green-400 border-green-500/40 bg-green-950/40", label: "Go" } :
+                null;
               return (
                 <span
                   key={agentId}
                   className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-gray-800 border border-gray-700 text-xs text-gray-300"
                 >
                   {agentInfo?.name || agentId}
+                  {verdictBadge && (
+                    <span
+                      className={`inline-flex items-center px-1.5 rounded border text-[10px] font-semibold ${verdictBadge.color}`}
+                      title={agentState?.verdict_summary || verdictBadge.label}
+                    >
+                      {verdictBadge.icon} {verdictBadge.label}
+                    </span>
+                  )}
+                  {reworkRound && reworkRound > 0 && (
+                    <span
+                      className="inline-flex items-center px-1.5 rounded border border-blue-500/40 bg-blue-950/40 text-blue-300 text-[10px] font-semibold"
+                      title={`Перезапущен после rework, раунд ${reworkRound}`}
+                    >
+                      ↻{reworkRound}
+                    </span>
+                  )}
                   {!isActive && (
                     <button
                       onClick={() => setRemoveTarget(agentId)}

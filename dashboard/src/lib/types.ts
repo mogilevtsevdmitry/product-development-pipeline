@@ -99,6 +99,21 @@ export interface AgentState {
   feedback_received?: FeedbackItem[]; // проблемы, полученные от других агентов
   run_history?: AgentRunRecord[];     // история всех запусков
   current_run?: number;               // текущий номер запуска
+
+  // verdict-loop (v0.3+): что агент написал в SUMMARY.md
+  verdict?: "go" | "no-go" | "needs_rework" | "n/a" | null;
+  verdict_summary?: string | null;
+  rework_round?: number;              // на каком rework-витке агент сейчас
+  rework_feedback?: string | null;    // feedback для следующего запуска (если есть)
+}
+
+export interface ReworkLogEntry {
+  by: string;
+  reset: string[];
+  round: number;
+  reason: string;
+  timestamp: string;
+  pause: boolean;
 }
 
 // --- Pipeline Graph (legacy, schema v1) ---
@@ -260,6 +275,9 @@ export interface ProjectState {
   gate_decisions: Record<string, GateDecision | null>;
   // Artifact filters: key = "dep_agent→target_agent", value = allowed filenames or null (pass all)
   artifact_filters?: Record<string, string[] | null>;
+  // verdict-loop (v0.3+)
+  rework_log?: ReworkLogEntry[];
+  verdict_block?: { by: string; reason: string; round: number } | null;
   // Web project detection & Docker preview
   is_web_project?: boolean;
   preview?: PreviewState;

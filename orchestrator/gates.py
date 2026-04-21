@@ -36,24 +36,32 @@ def check_gate(state: Dict[str, Any]) -> Optional[str]:
         after_agents: List[str] = gate_def["after_agents"]
         before_agents: List[str] = gate_def["before_agents"]
 
-        # Проверяем, что gate-агенты есть в графе пайплайна
-        after_in_graph = all(a in pipeline_nodes for a in after_agents)
-        before_in_graph = any(a in pipeline_nodes for a in before_agents)
-
-        if not after_in_graph or not before_in_graph:
+        # Gate срабатывает если в графе есть хоть один after_agent.
+        # Раньше требовалось наличие before_agents — но Pipeline Architect
+        # может убрать ненужного агента (например release-manager для MVP-бота),
+        # и тогда gate тихо терялся, пропуская QA-вердикт.
+        after_in_graph = any(a in pipeline_nodes for a in after_agents)
+        if not after_in_graph:
             continue
 
-        # Все after_agents должны быть completed
+        # Все after_agents, присутствующие в графе, должны быть completed
+        after_in_graph_list = [a for a in after_agents if a in pipeline_nodes]
         all_after_completed = all(
             agents_state.get(agent_id, {}).get("status") == "completed"
-            for agent_id in after_agents
+            for agent_id in after_in_graph_list
         )
 
-        # Хотя бы один before_agent должен быть pending
-        any_before_pending = any(
-            agents_state.get(agent_id, {}).get("status") == "pending"
-            for agent_id in before_agents
-        )
+        # Если before_agents в графе есть — хотя бы один должен быть pending.
+        # Если их нет (PA выбросил) — gate всё равно нужно сработать
+        # как post-checkpoint после соответствующих after_agents.
+        before_in_graph_list = [a for a in before_agents if a in pipeline_nodes]
+        if before_in_graph_list:
+            any_before_pending = any(
+                agents_state.get(agent_id, {}).get("status") == "pending"
+                for agent_id in before_in_graph_list
+            )
+        else:
+            any_before_pending = True  # post-checkpoint режим
 
         # Gate ещё не разрешён
         not_resolved = not is_gate_resolved(state, gate_name)

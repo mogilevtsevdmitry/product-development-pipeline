@@ -27,10 +27,12 @@ from context_manager import (
     SUMMARY_FILENAME,
     build_summary_instruction,
     build_decisions_instruction,
+    build_rework_section,
     collect_input_context,
     ensure_summary_exists,
     read_decisions,
 )
+from verdict_handler import clear_rework_feedback, get_rework_feedback
 from budget import (
     AgentAuthError,
     AgentRateLimited,
@@ -306,6 +308,14 @@ def _build_task_prompt(
     """Финальный пользовательский промпт (без системной части — она в --append-system-prompt)."""
     parts: List[str] = [_collect_base_context(agent_id, project_id, project_path, state)]
     parts.append(_decisions_section(project_id))
+
+    # Если это rework-запуск, инжектим feedback от проверяющего и сбрасываем флаг
+    if state is not None:
+        rework_fb = get_rework_feedback(state, agent_id)
+        if rework_fb:
+            parts.append(build_rework_section(rework_fb))
+            clear_rework_feedback(state, agent_id)
+
     parts.append(
         f"\n\n# Куда сохранять артефакты\n\n"
         f"Все выходные файлы — в `{output_dir}/`. Формат: Markdown."
