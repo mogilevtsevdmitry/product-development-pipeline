@@ -426,6 +426,15 @@ function getAgentPhase(agentId: string): string {
   return phaseMap[agentId] || "unknown";
 }
 
+export interface PhaseBreakdown {
+  id: string;
+  total: number;
+  completed: number;
+  running: number;
+  failed: number;
+  pending: number;
+}
+
 export interface ProjectSummary {
   project_id: string;
   name: string;
@@ -438,6 +447,31 @@ export interface ProjectSummary {
   current_gate: string | null;
   agents_total: number;
   agents_completed: number;
+  phase_breakdown: PhaseBreakdown[];
+}
+
+/** Реальная разбивка по фазам на основе агентов из state.agents (без синтетических данных). */
+function computePhaseBreakdown(state: ProjectState): PhaseBreakdown[] {
+  const buckets = new Map<string, PhaseBreakdown>();
+  const order: string[] = [];
+
+  const nodes = state.pipeline_graph?.nodes || Object.keys(state.agents || {});
+  for (const agentId of nodes) {
+    const phase = AGENT_PHASES[agentId];
+    if (!phase || phase === "meta") continue; // мета-агентов не показываем в шкале
+    if (!buckets.has(phase)) {
+      buckets.set(phase, { id: phase, total: 0, completed: 0, running: 0, failed: 0, pending: 0 });
+      order.push(phase);
+    }
+    const b = buckets.get(phase)!;
+    const status = state.agents?.[agentId]?.status || "pending";
+    b.total += 1;
+    if (status === "completed") b.completed += 1;
+    else if (status === "running") b.running += 1;
+    else if (status === "failed") b.failed += 1;
+    else b.pending += 1;
+  }
+  return order.map((id) => buckets.get(id)!);
 }
 
 /** Agents that write code/configs to the external project directory (when project_path is set) */
@@ -470,6 +504,7 @@ export function listProjects(): ProjectSummary[] {
         current_gate: state.current_gate,
         agents_total: agents.length,
         agents_completed: agents.filter((a) => a.status === "completed").length,
+        phase_breakdown: computePhaseBreakdown(state),
       });
     } catch {
       // skip malformed files

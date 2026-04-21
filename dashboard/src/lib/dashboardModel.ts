@@ -1,6 +1,15 @@
 export type VStatus = "running" | "gate" | "completed" | "failed" | "pending";
 export type VHealth = "on_track" | "blocked" | "not_started";
 
+export interface PhaseBreakdown {
+  id: string;
+  total: number;
+  completed: number;
+  running: number;
+  failed: number;
+  pending: number;
+}
+
 export interface ProjectSummary {
   project_id: string;
   name: string;
@@ -13,6 +22,7 @@ export interface ProjectSummary {
   current_gate: string | null;
   agents_total: number;
   agents_completed: number;
+  phase_breakdown?: PhaseBreakdown[];
 }
 
 export interface VProject {
@@ -63,23 +73,30 @@ function mapHealth(s: VStatus, completed: number): VHealth {
   return "on_track";
 }
 
-// Synthesize phase timeline from created/updated + progress ratio.
-// Creates 7 canonical phases spread evenly across the project lifetime.
-function synthesizePhases(started: Date, eta: Date, progress: number): VPhase[] {
-  const canonical = ["research", "product", "design", "dev", "quality", "release", "marketing"];
-  const span = eta.getTime() - started.getTime();
-  const step = span / canonical.length;
-  const now = Date.now();
-  return canonical.map((id, i) => {
-    const s = new Date(started.getTime() + step * i);
-    const e = new Date(started.getTime() + step * (i + 1));
-    const phaseProgress = (i / canonical.length) * 100;
-    const nextProgress = ((i + 1) / canonical.length) * 100;
+// Реальные фазы из state.agents: только те, у которых есть агенты в графе проекта.
+// Длительности — это плановые слоты, рассчитанные пропорционально размеру фазы.
+function buildPhasesFromBreakdown(
+  breakdown: PhaseBreakdown[],
+  started: Date,
+  eta: Date,
+): VPhase[] {
+  if (!breakdown.length) return [];
+  const totalAgents = breakdown.reduce((sum, b) => sum + b.total, 0) || breakdown.length;
+  const span = Math.max(1, eta.getTime() - started.getTime());
+  let cursor = started.getTime();
+
+  return breakdown.map((b) => {
+    const share = b.total / totalAgents;
+    const dur = span * share;
+    const s = new Date(cursor);
+    cursor += dur;
+    const e = new Date(cursor);
+
     let status: VPhase["status"] = "plan";
-    if (progress >= nextProgress) status = "done";
-    else if (progress > phaseProgress) status = "run";
-    else if (now > s.getTime() && now < e.getTime()) status = "plan";
-    return { id, start: s, end: e, status };
+    if (b.failed > 0) status = "fail";
+    else if (b.total > 0 && b.completed === b.total) status = "done";
+    else if (b.running > 0 || (b.completed > 0 && b.completed < b.total)) status = "run";
+    return { id: b.id, start: s, end: e, status };
   });
 }
 
@@ -95,9 +112,8 @@ export function mapProject(p: ProjectSummary): VProject {
     ? updated
     : new Date(started.getTime() + (progress > 0 ? elapsed / (progress / 100) : elapsed * 3));
 
-  let phases = synthesizePhases(started, eta, progress);
+  let phases = buildPhasesFromBreakdown(p.phase_breakdown || [], started, eta);
   if (p.current_gate) {
-    // Mark the current phase as gate
     const runIdx = phases.findIndex((ph) => ph.status === "run");
     if (runIdx >= 0) phases[runIdx] = { ...phases[runIdx], status: "gate" };
   }
@@ -209,7 +225,8 @@ export const PHASES = [
   { id: "product", name: "Продукт", color: "var(--ph-product)" },
   { id: "legal", name: "Legal", color: "var(--ph-legal)" },
   { id: "design", name: "Дизайн", color: "var(--ph-design)" },
-  { id: "dev", name: "Разработка", color: "var(--ph-dev)" },
+  { id: "development", name: "Разработка", color: "var(--ph-dev)" },
+  { id: "content", name: "Контент", color: "var(--ph-marketing)" },
   { id: "quality", name: "Качество", color: "var(--ph-quality)" },
   { id: "release", name: "Релиз", color: "var(--ph-release)" },
   { id: "marketing", name: "Маркетинг", color: "var(--ph-marketing)" },
