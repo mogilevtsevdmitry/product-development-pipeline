@@ -495,39 +495,85 @@ export default function AgentDetailPage({
           <h3 className="font-semibold text-white mb-3">Артефакты</h3>
           {agent.artifacts.length === 0 ? (
             <p className="text-gray-500 text-sm">Нет артефактов</p>
-          ) : (
-            <div className="space-y-2">
-              {agent.artifacts.filter((p) => !p.includes("node_modules") && !p.includes(".next/") && !p.includes("__pycache__")).map((artifactPath, i) => {
-                const fileName = artifactPath.split("/").pop() || artifactPath;
-                const isOpen = openArtifact === artifactPath;
-                return (
-                  <button
-                    key={i}
-                    onClick={() =>
-                      setOpenArtifact(isOpen ? null : artifactPath)
-                    }
-                    className={`w-full text-left flex items-center justify-between rounded-lg border px-4 py-3 transition-colors ${
-                      isOpen
-                        ? "bg-blue-950/30 border-blue-700/50"
-                        : "bg-gray-950 border-gray-800 hover:border-gray-600"
-                    }`}
-                  >
-                    <div>
-                      <div className="text-sm font-medium text-gray-200">
-                        📄 {fileName}
-                      </div>
-                      <div className="text-xs text-gray-500 font-mono mt-0.5">
-                        {artifactPath}
-                      </div>
+          ) : (() => {
+            const cleanArtifacts = agent.artifacts.filter(
+              (p) => !p.includes("node_modules") && !p.includes(".next/") && !p.includes("__pycache__")
+            );
+            // SUMMARY.md — главный «прочти меня в первую очередь»
+            const primary = cleanArtifacts.find((p) => (p.split("/").pop() || "").toUpperCase() === "SUMMARY.MD") || null;
+            // Slice-summaries (S01_SUMMARY.md и т.п.) — вторичные «прочти меня»
+            const sliceSummaries = cleanArtifacts.filter((p) => /\/S\d+_SUMMARY\.md$/i.test(p));
+            const others = cleanArtifacts.filter((p) => p !== primary && !sliceSummaries.includes(p));
+
+            const renderRow = (artifactPath: string, kind: "primary" | "slice" | "other") => {
+              const fileName = artifactPath.split("/").pop() || artifactPath;
+              const isOpen = openArtifact === artifactPath;
+              const styles = kind === "primary"
+                ? (isOpen
+                    ? "bg-amber-950/40 border-amber-500/60 ring-1 ring-amber-500/40"
+                    : "bg-gradient-to-r from-amber-950/30 to-gray-900 border-amber-500/40 hover:border-amber-400")
+                : kind === "slice"
+                ? (isOpen
+                    ? "bg-blue-950/40 border-blue-600/60"
+                    : "bg-gray-950 border-blue-900/40 hover:border-blue-700")
+                : (isOpen
+                    ? "bg-blue-950/30 border-blue-700/50"
+                    : "bg-gray-950 border-gray-800 hover:border-gray-600");
+              const icon = kind === "primary" ? "⭐" : kind === "slice" ? "📑" : "📄";
+              const titleSize = kind === "primary" ? "text-base font-semibold text-amber-100" : "text-sm font-medium text-gray-200";
+              return (
+                <button
+                  key={artifactPath}
+                  onClick={() => setOpenArtifact(isOpen ? null : artifactPath)}
+                  className={`w-full text-left flex items-center justify-between rounded-lg border px-4 py-3 transition-colors ${styles}`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className={titleSize}>
+                      {icon} {fileName}
+                      {kind === "primary" && (
+                        <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-[10px] font-semibold text-amber-200 uppercase tracking-wide">
+                          TL;DR · Прочти первым
+                        </span>
+                      )}
                     </div>
-                    <span className="text-xs text-gray-500">
-                      {isOpen ? "▼ Закрыть" : "▶ Открыть"}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
+                    {kind === "primary" && agent.verdict_summary && (
+                      <div className="text-xs text-amber-200/80 mt-1 italic line-clamp-2">
+                        💬 {agent.verdict_summary}
+                      </div>
+                    )}
+                    <div className="text-xs text-gray-500 font-mono mt-0.5 truncate">
+                      {artifactPath}
+                    </div>
+                  </div>
+                  <span className="text-xs text-gray-400 ml-3 flex-shrink-0">
+                    {isOpen ? "▼ Закрыть" : "▶ Открыть"}
+                  </span>
+                </button>
+              );
+            };
+
+            return (
+              <div className="space-y-2">
+                {primary && renderRow(primary, "primary")}
+                {sliceSummaries.length > 0 && (
+                  <>
+                    <div className="text-[11px] uppercase tracking-wider text-gray-500 mt-3 mb-1">
+                      Slice-резюме
+                    </div>
+                    {sliceSummaries.map((p) => renderRow(p, "slice"))}
+                  </>
+                )}
+                {others.length > 0 && (
+                  <>
+                    <div className="text-[11px] uppercase tracking-wider text-gray-500 mt-3 mb-1">
+                      Все артефакты ({others.length})
+                    </div>
+                    {others.map((p) => renderRow(p, "other"))}
+                  </>
+                )}
+              </div>
+            );
+          })()}
         </div>
 
         {/* Artifact Viewer */}
