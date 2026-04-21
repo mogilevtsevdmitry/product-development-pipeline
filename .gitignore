@@ -43,3 +43,8 @@ Thumbs.db
 
 # === Claude Code local config ===
 .claude/
+
+
+# Diagnostic runtime utilities — не для коммита
+orchestrator/_e2e_runner.py
+

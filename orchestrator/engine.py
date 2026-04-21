@@ -59,19 +59,23 @@ def create_project(
     project_id = _slugify(name)
     timestamp = datetime.now(timezone.utc).isoformat()
 
-    # Начальный граф — только статическая цепочка
+    # Начальный граф: статическая цепочка + pipeline-architect.
+    # PA должен быть в графе с самого начала, иначе gate_1_build (before=[pipeline-architect])
+    # никогда не сработает и пайплайн «завершится» после product-owner.
+    initial_nodes = list(STATIC_CHAIN) + ["pipeline-architect"]
     initial_graph = {
-        "nodes": list(STATIC_CHAIN),
+        "nodes": initial_nodes,
         "edges": [
             ["problem-researcher", "market-researcher"],
             ["market-researcher", "product-owner"],
+            ["product-owner", "pipeline-architect"],
         ],
         "parallel_groups": [],
     }
 
     # Начальное состояние агентов
     agents_state: Dict[str, Any] = {}
-    for agent_id in STATIC_CHAIN:
+    for agent_id in initial_nodes:
         agents_state[agent_id] = {
             "status": "pending",
             "started_at": None,
@@ -230,15 +234,15 @@ def _run_single_agent(
     state["updated_at"] = datetime.now(timezone.utc).isoformat()
     _save_state(state)
 
-    # Собираем входные артефакты
+    # Собираем входные артефакты (для записи в state; контекст агент строит сам по графу)
     input_artifacts = get_input_artifacts_for_agent(agent_id, state)
 
     # Первая попытка
-    result = run_agent(agent_id, project_id, input_artifacts)
+    result = run_agent(agent_id, project_id, input_artifacts, state=state)
 
     if result["status"] == "failed":
         # Retry: одна повторная попытка
-        result = run_agent(agent_id, project_id, input_artifacts)
+        result = run_agent(agent_id, project_id, input_artifacts, state=state)
 
     # Обновляем состояние агента
     state["agents"][agent_id]["status"] = result["status"]
@@ -389,8 +393,47 @@ def _expand_pipeline_graph(state: Dict[str, Any]) -> Dict[str, Any]:
                 continue
 
     if pipeline_config and "nodes" in pipeline_config:
-        # Pipeline Architect создал конфигурацию
-        new_graph = pipeline_config
+        # Pipeline Architect создал конфигурацию — пропускаем через валидатор.
+        from pipeline_validator import detect_product_flags, validate, render_report
+        from context_manager import append_decision
+
+        po_brief = ""
+        po_artifacts = state["agents"].get("product-owner", {}).get("artifacts", [])
+        for ap in po_artifacts:
+            full = project_dir / ap
+            if full.exists() and full.suffix == ".md":
+                po_brief += full.read_text(encoding="utf-8") + "\n"
+
+        flags = detect_product_flags(state.get("description", ""), po_brief)
+        validation = validate(pipeline_config["nodes"], flags)
+
+        # Чистим граф по результатам валидации
+        kept = set(validation.kept)
+        agent_nodes = [n for n in pipeline_config["nodes"] if n.get("type") != "gate"]
+        new_nodes = [n["id"] for n in agent_nodes if n["id"] in kept]
+        new_edges: List[List[str]] = []
+        for n in agent_nodes:
+            if n["id"] not in kept:
+                continue
+            for dep in n.get("depends_on", []):
+                if dep in kept and dep != n["id"]:
+                    new_edges.append([dep, n["id"]])
+
+        new_graph = {
+            "nodes": new_nodes,
+            "edges": new_edges,
+            "parallel_groups": pipeline_config.get("parallel_groups", []),
+        }
+
+        # Логируем решение валидатора в DECISIONS.md
+        if validation.removed or validation.warnings:
+            append_decision(
+                project_id=state["project_id"],
+                agent_id="pipeline-validator",
+                title="Состав агентов уточнён валидатором",
+                rationale=render_report(validation),
+                consequences=f"В пайплайне останется {len(new_nodes)} агентов.",
+            )
     else:
         # Используем полный граф по умолчанию
         new_graph = DEFAULT_FULL_GRAPH
@@ -408,6 +451,11 @@ def _expand_pipeline_graph(state: Dict[str, Any]) -> Dict[str, Any]:
                 "artifacts": [],
                 "error": None,
             }
+
+    # Пересоздаём блоки из реального графа, чтобы дашборд показал нормальную
+    # фазную группировку, а не одну общую кучу «Расширенный пайплайн».
+    from blocks_generator import regenerate_blocks_from_graph
+    state["blocks"] = regenerate_blocks_from_graph(state)
 
     return state
 
