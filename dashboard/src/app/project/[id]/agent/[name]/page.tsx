@@ -522,33 +522,53 @@ export default function AgentDetailPage({
               const icon = kind === "primary" ? "⭐" : kind === "slice" ? "📑" : "📄";
               const titleSize = kind === "primary" ? "text-base font-semibold text-amber-100" : "text-sm font-medium text-gray-200";
               return (
-                <button
-                  key={artifactPath}
-                  onClick={() => setOpenArtifact(isOpen ? null : artifactPath)}
-                  className={`w-full text-left flex items-center justify-between rounded-lg border px-4 py-3 transition-colors ${styles}`}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className={titleSize}>
-                      {icon} {fileName}
-                      {kind === "primary" && (
-                        <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-[10px] font-semibold text-amber-200 uppercase tracking-wide">
-                          TL;DR · Прочти первым
-                        </span>
-                      )}
-                    </div>
-                    {kind === "primary" && agent.verdict_summary && (
-                      <div className="text-xs text-amber-200/80 mt-1 italic line-clamp-2">
-                        💬 {agent.verdict_summary}
+                <div key={artifactPath} className="space-y-2">
+                  <button
+                    onClick={(e) => {
+                      const next = isOpen ? null : artifactPath;
+                      setOpenArtifact(next);
+                      if (next) {
+                        // Плавно прокручиваем кнопку в верх вьюпорта,
+                        // чтобы раскрытое содержимое было видно.
+                        const el = e.currentTarget as HTMLElement;
+                        requestAnimationFrame(() =>
+                          el.scrollIntoView({ behavior: "smooth", block: "start" })
+                        );
+                      }
+                    }}
+                    className={`w-full text-left flex items-center justify-between rounded-lg border px-4 py-3 transition-colors ${styles}`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className={titleSize}>
+                        {icon} {fileName}
+                        {kind === "primary" && (
+                          <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-[10px] font-semibold text-amber-200 uppercase tracking-wide">
+                            TL;DR · Прочти первым
+                          </span>
+                        )}
                       </div>
-                    )}
-                    <div className="text-xs text-gray-500 font-mono mt-0.5 truncate">
-                      {artifactPath}
+                      {kind === "primary" && agent.verdict_summary && (
+                        <div className="text-xs text-amber-200/80 mt-1 italic line-clamp-2">
+                          💬 {agent.verdict_summary}
+                        </div>
+                      )}
+                      <div className="text-xs text-gray-500 font-mono mt-0.5 truncate">
+                        {artifactPath}
+                      </div>
                     </div>
-                  </div>
-                  <span className="text-xs text-gray-400 ml-3 flex-shrink-0">
-                    {isOpen ? "▼ Закрыть" : "▶ Открыть"}
-                  </span>
-                </button>
+                    <span className="text-xs text-gray-400 ml-3 flex-shrink-0">
+                      {isOpen ? "▼ Закрыть" : "▶ Открыть"}
+                    </span>
+                  </button>
+                  {/* Inline-просмотр содержимого прямо под кликнутой кнопкой */}
+                  {isOpen && (
+                    <ArtifactViewer
+                      projectId={state.project_id}
+                      artifactPath={artifactPath}
+                      onClose={() => setOpenArtifact(null)}
+                    />
+                  )}
+                </div>
               );
             };
 
@@ -576,14 +596,7 @@ export default function AgentDetailPage({
           })()}
         </div>
 
-        {/* Artifact Viewer */}
-        {openArtifact && (
-          <ArtifactViewer
-            projectId={state.project_id}
-            artifactPath={openArtifact}
-            onClose={() => setOpenArtifact(null)}
-          />
-        )}
+        {/* Artifact viewers рендерятся inline под каждой кнопкой выше */}
 
         {/* Feedback Panel — for QA, Security, DevOps */}
         {agent.status === "completed" && (() => {
